@@ -35,6 +35,8 @@
 #define VSPI_CLK 18
 #define VSPI_MOSI 23 // aka D0
 #define VSPI_MISO 19 // aka D1
+#define VSPI_D0 23
+#define VSPI_D1 19
 #define VSPI_D2 21
 #define VSPI_D3 22
 
@@ -433,7 +435,7 @@ void setup() {
   delay(500);
   msg_idx = 0;
   pinMode(0, OUTPUT);
-  randomSeed(time(NULL));
+
 
   i2s.setPins(I2S_BCLK, I2S_LRC, I2S_DIN);
 
@@ -486,7 +488,7 @@ void loop() {
   // send_MP3("/RA_NGGYU.wav");
   // send_MP3("/PB_ShSe.wav");
   // send_MP3("/meglo.mp3");
-
+  randomSeed(time(NULL));
   uint32_t idx = random(0, NUM_WAV);
   // Serial.printf("idx: %d\n", idx);
 
