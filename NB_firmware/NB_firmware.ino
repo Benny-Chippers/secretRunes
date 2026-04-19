@@ -25,6 +25,7 @@
 
 #include <SoftwareSerial.h>
 #include <ESP_I2S.h>
+#include <SPIMemory.h>
 
 #include "FS.h"
 #include "SD.h"
@@ -52,9 +53,9 @@ SoftwareSerial SBuart(UART_RX, UART_TX);
 #define HSPI_CLK 14
 #define HSPI_MOSI 13
 #define HSPI_MISO 12
-#define HSPI_CS_SD 4
-#define HSPI_CS_FL 15
-#define HSPI_CS_PS 2
+#define HSPI_CS_SD 4  // old NB/MB: 4, big board: 26
+#define HSPI_CS_FL 15   // old NB/MB: 15, big board: 27
+#define HSPI_CS_PS 2   // old NB/MB: 2, big board: 23
 
 
 #define I2S_LRC  34
@@ -336,6 +337,26 @@ size_t send_MP3(const char filepath[]) {
 }
 
 
+// Timeout is number of seconds it'll try (every 2.5 sec)
+bool SD_init(double timeout) {
+  SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_SD);
+  double elapsed = 0;
+  while (!SD.begin(HSPI_CS_SD) & (elapsed < timeout)) {                         // Tries to connect for 7.5 seconds
+    Serial.println("Error: SD Card mount failed");
+    delay(2500);
+    elapsed += 2.5;
+  }
+  uint8_t sd_type = SD.cardType();
+  if (sd_type == CARD_NONE) {
+    Serial.println("Error: no SD Card attached");
+    return false;
+  }
+  Serial.printf("\nSD Card size: %d\nSectors: %d\nTotal: %d Bytes\nUsed: %d Bytes\n\n", SD.cardSize(), SD.numSectors(), SD.sectorSize(), SD.totalBytes(), SD.usedBytes());
+  return true;
+}
+
+SPIFlash flash(HSPI_CS_FL, &SPI);
+
 void setup() {
   Serial.begin(115200);
   delay(500);
@@ -354,25 +375,44 @@ void setup() {
 
   // Adapted from Arduino Example SD_Test.ino
   Serial.println("HSPI Init...");
-  SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_SD);
-  while (!SD.begin(HSPI_CS_SD)) {                         // Hangs until success
-    Serial.println("Error: SD Card mount failed");
-    delay(5000);
-  }
-  uint8_t sd_type = SD.cardType();
-  if (sd_type == CARD_NONE) {
-    Serial.println("Error: no SD Card attached");
-    return;
-  }
+
+  bool ret = SD_init(0);
+  Serial.printf("\nSD Init: %d\n", ret);
+
 
   // Initing flash memory
   
+  SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_FL);
+  ret = flash.begin(512000000);                     
+  Serial.printf("\nFlash Init: %d\n", ret);
 
 
+  Serial.printf("%d kb\n", flash.getCapacity()/1000);
+  char str[] = "This is a test string\n";
+  for (int i = 0; i < 256; i++) {
+    flash.writeChar(i, str[i]);
+  }
+  // flash.writeCharArray(0x0, str, 8*strlen(str));
 
+  // Serial.println(flash.readCharArray);
+
+  char rx_str[] = "                                            \0";
+  // memset(rx_str, '0', 256);
+  // flash.readCharArray(0x0, rx_str, 8*strlen(rx_str));
+  Serial.println("Reading from flash:");
+
+  for (int i = 0; i < strlen(str); i++) {
+    // char a = ;
+    Serial.print(flash.readChar(i));
+    // if (a == '\0') {
+    //   exit(-1);
+    // }
+    // Serial.print(' ');
+  }
 
   Serial.println("\nNorthbridge initialized");
 }
+
 
 
 void loop() {
