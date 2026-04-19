@@ -56,12 +56,12 @@ SoftwareSerial SBuart(UART_RX, UART_TX);
 #define HSPI_CS_SD 4  // old NB/MB: 4, big board: 26
 #define HSPI_CS_FL 15   // old NB/MB: 15, big board: 27
 #define HSPI_CS_PS 2   // old NB/MB: 2, big board: 23
+#define FL_FREQ 20000000 // in Hz
 
-
+// Archaic: NB-Audio hotwiring for System Verification 1
 #define I2S_LRC  34
 #define I2S_BCLK 36
 #define I2S_DIN  39
-
 i2s_data_bit_width_t bps = I2S_DATA_BIT_WIDTH_16BIT;
 i2s_mode_t mode = I2S_MODE_STD;
 i2s_slot_mode_t slot = I2S_SLOT_MODE_STEREO;
@@ -247,6 +247,7 @@ void read_SD(const char filepath[]) {
   }
 }
 
+
 // Gets SD card size
 size_t get_SD_size(const char filepath[]) {
   if (SD.exists(filepath)) {
@@ -262,7 +263,7 @@ size_t get_SD_size(const char filepath[]) {
 
 // Reads data from given SD card file to data buffer. Note: buffer is passed by reference,
 // and must be instantiated with the required file's size before calling this function
-// Note: UART bottlenecks us from being able to use UART for continuous music transmission
+// Note: UART bottlenecked old setup from being able to use UART for continuous music transmission
 size_t read_SD2buf(const char filepath[], size_t size, uint8_t* buf) {
   if (SD.exists(filepath)) {
     File f = SD.open(filepath);
@@ -356,60 +357,92 @@ bool SD_init(double timeout) {
 }
 
 SPIFlash flash(HSPI_CS_FL, &SPI);
+uint64_t FL_MAX;
+
+
+// Wipes entire flash chip. Be cautious about using this function
+bool FL_clear() {
+  if (!flash.eraseChip()) {
+    Serial.println("Error: Couldn't clear Flash Memory");
+    return false; 
+  }
+  return true;
+}
+
+
+void FL_readHex(uint32_t start, uint32_t end) {
+  Serial.printf("Reading from flash:");
+  for (uint32_t i = start; i < end; i++) {
+    if ((i % (0xFF+1)) == 0) {
+      Serial.printf("\n0x%x\t", i);
+    }
+    Serial.printf("%x", flash.readByte(i));
+  }
+  Serial.printf("\n");
+}
+
+
+void FL_readChar(uint32_t start, uint32_t end) {
+  Serial.printf("Reading from flash:");
+  for (uint32_t i = start; i < end; i++) {
+    if ((i % (0xFF+1)) == 0) {
+      Serial.printf("\n0x%x\t", i);
+    }
+    Serial.printf("%c", flash.readByte(i));
+  }
+  Serial.printf("\n");
+}
+
 
 void setup() {
   Serial.begin(115200);
-  delay(500);
-  msg_idx = 0;
   pinMode(0, OUTPUT);
   randomSeed(time(NULL));
-  // bootloader_random_enable();
 
-  i2s.setPins(I2S_BCLK, I2S_LRC, I2S_DIN);
+  // i2s.setPins(I2S_BCLK, I2S_LRC, I2S_DIN);
 
   memset(TX_buf, '\0', BUF_SIZE);  // Prepares communication buffers
   memset(RX_buf, '\0', BUF_SIZE);
   strcpy((char*) TX_buf, "This is a SPI message from the NB to the CPU.");
   SBuart.begin(UART_BAUD);
 
-
-  // Adapted from Arduino Example SD_Test.ino
   Serial.println("HSPI Init...");
-
-  bool ret = SD_init(0);
-  Serial.printf("\nSD Init: %d\n", ret);
-
-
-  // Initing flash memory
   
+  // Initializing flash memory
   SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_FL);
-  ret = flash.begin(512000000);                     
+  ret = flash.begin(128000000);                     
   Serial.printf("\nFlash Init: %d\n", ret);
+  flash.setClock(FL_FREQ);
+  FL_MAX = flash.getCapacity();
+  Serial.printf("%d kB Capacity\n", FL_MAX/8000);
+  
 
+  // Serial.printf("Clearing Flash: %d\n", FL_clear());
+  // FL_readChar(0x0, 0x3FF);
 
-  Serial.printf("%d kb\n", flash.getCapacity()/1000);
-  char str[] = "This is a test string\n";
-  for (int i = 0; i < 256; i++) {
-    flash.writeChar(i, str[i]);
+  char str[] = "This is a sample string";
+  Serial.printf("Sample Text Write: %d\n", flash.writeCharArray(0, str, strlen(str)));
+  // FL_readChar(0x0, 0x3FF);
+  // FL_readHex(0x0, FL_MAX);
+
+  uint8_t test[4096];
+  Serial.println("Start of read test");
+
+  for (uint64_t i = 0; i < 4096; i++) {
+    test[i] = flash.readByte(i, true);
   }
-  // flash.writeCharArray(0x0, str, 8*strlen(str));
+  Serial.println("Test end");
 
-  // Serial.println(flash.readCharArray);
-
-  char rx_str[] = "                                            \0";
-  // memset(rx_str, '0', 256);
-  // flash.readCharArray(0x0, rx_str, 8*strlen(rx_str));
-  Serial.println("Reading from flash:");
-
-  for (int i = 0; i < strlen(str); i++) {
-    // char a = ;
-    Serial.print(flash.readChar(i));
-    // if (a == '\0') {
-    //   exit(-1);
-    // }
-    // Serial.print(' ');
+  for (uint64_t i = 0; i < 4096; i++) {
+    if ((i % (0xFF+1)) == 0) {
+      Serial.printf("\n0x%x\t", i);
+    }
+    Serial.printf("%c", test[i]);
   }
 
+
+  double timeout = 0;       // Time to wait on SD card
+  // Serial.printf("\nSD Init: %d\n", SD_init(timeout));
   Serial.println("\nNorthbridge initialized");
 }
 
