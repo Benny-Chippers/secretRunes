@@ -24,12 +24,12 @@
 #include <esp_heap_caps.h>
 
 #include <SoftwareSerial.h>
-#include <ESP_I2S.h>
+#include <ESP_I2S.h>        // Possibly unneeded (if NB-SB uart streaming goes well)
 #include <SPIMemory.h>
+#include <FS.h>
+#include <SD.h>
+#include <SPI.h>
 
-#include "FS.h"
-#include "SD.h"
-#include "SPI.h"
 #include "constants.h"
 
 
@@ -53,10 +53,11 @@ SoftwareSerial SBuart(UART_RX, UART_TX);
 #define HSPI_CLK 14
 #define HSPI_MOSI 13
 #define HSPI_MISO 12
-#define HSPI_CS_SD 4  // old NB/MB: 4, big board: 26
+#define HSPI_CS_SD 26  // old NB/MB: 4, big board: 26
 #define HSPI_CS_FL 15   // old NB/MB: 15, big board: 27
-#define HSPI_CS_PS 2   // old NB/MB: 2, big board: 23
-#define FL_FREQ 20000000 // in Hz
+#define HSPI_CS_PS 2   // old NB/MB: 2, big board: 15
+#define FL_FREQ 40000000 // in Hz
+#define PS_FREQ FL_FREQ
 
 // Archaic: NB-Audio hotwiring for System Verification 1
 #define I2S_LRC  34
@@ -86,6 +87,20 @@ int msg_idx;
 // For UART Configuration
 uart_config_t uart_config;
 QueueHandle_t uart_queue;
+
+// For HSPI Configuration
+spi_host_device_t sd_host = SPI1_HOST;
+spi_bus_config_t sd_bus;
+sdmmc_host_t sd_cfg = SDSPI_HOST_DEFAULT();
+sdspi_device_config_t sd;
+sdspi_dev_handle_t sd_handle;
+spi_bus_config_t bus_cfg;
+
+SPIFlash flash(HSPI_CS_FL, &SPI);
+SPIFlash psram(HSPI_CS_PS, &SPI);
+uint64_t FL_MAX;
+uint64_t PS_MAX;
+uint32_t ret;
 
 
 // Initializes UART using given pins
@@ -130,6 +145,7 @@ bool init_spi(spi_host_device_t host, spi_bus_config_t spi_bus, int mosi, int mi
     return true;
   }
 }
+
 
 
 // // Queues a variable length SPI message to CPU. payload is message to send, length is bytes to send
@@ -222,15 +238,6 @@ void transmit_SPI(uint8_t* payload, uint32_t length) {
   //   }
 }
 
-// For HSPI Configuration
-spi_host_device_t sd_host = SPI1_HOST;
-spi_bus_config_t sd_bus;
-sdmmc_host_t sd_cfg = SDSPI_HOST_DEFAULT();
-sdspi_device_config_t sd;
-sdspi_dev_handle_t sd_handle;
-spi_bus_config_t bus_cfg;
-
-esp_err_t ret;
 
 // Reads data from given SD card file to Serial Monitor. Note: prefix filenames with '/'
 void read_SD(const char filepath[]) {
@@ -356,9 +363,6 @@ bool SD_init(double timeout) {
   return true;
 }
 
-SPIFlash flash(HSPI_CS_FL, &SPI);
-uint64_t FL_MAX;
-
 
 // Wipes entire flash chip. Be cautious about using this function
 bool FL_clear() {
@@ -371,26 +375,30 @@ bool FL_clear() {
 
 
 void FL_readHex(uint32_t start, uint32_t end) {
+  uint8_t test[end - start];
   Serial.printf("Reading from flash:");
+  flash.readByteArray(start, (uint8_t*) &test, end, true);
   for (uint32_t i = start; i < end; i++) {
     if ((i % (0xFF+1)) == 0) {
       Serial.printf("\n0x%x\t", i);
     }
-    Serial.printf("%x", flash.readByte(i));
+    Serial.printf("%x", (char*) test[i]);
   }
-  Serial.printf("\n");
+  Serial.printf("\nEnd read\n");
 }
 
 
 void FL_readChar(uint32_t start, uint32_t end) {
+  uint8_t test[end - start];
   Serial.printf("Reading from flash:");
+  flash.readByteArray(start, (uint8_t*) &test, end, true);
   for (uint32_t i = start; i < end; i++) {
     if ((i % (0xFF+1)) == 0) {
       Serial.printf("\n0x%x\t", i);
     }
-    Serial.printf("%c", flash.readByte(i));
+    Serial.printf("%c", (char*) test[i]);
   }
-  Serial.printf("\n");
+  Serial.printf("\nEnd read\n");
 }
 
 
@@ -410,39 +418,63 @@ void setup() {
   
   // Initializing flash memory
   SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_FL);
-  ret = flash.begin(128000000);                     
+  ret = flash.begin(16000000);                     
   Serial.printf("\nFlash Init: %d\n", ret);
   flash.setClock(FL_FREQ);
   FL_MAX = flash.getCapacity();
-  Serial.printf("%d kB Capacity\n", FL_MAX/8000);
+  Serial.printf("%d kB Capacity\n", FL_MAX/1000);
   
+
+  // Initalizing PSRAM (in-progress)
+  SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_PS);
+  // SPI();
+  ret = psram.begin(8000000);                     
+  PS_MAX = psram.getCapacity();
+  Serial.printf("\nPSRAM Init: %d, cap: %d\n", ret, PS_MAX);
+  psram.setClock(PS_FREQ);
+  // Serial.printf("Start RAM: %u\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
+  // Serial.printf("PSRAM: %u\n", ESP.getFreeHeap());
+  char str[] = "This is a sample string"; 
+  psram.writeCharArray(0, str, strlen(str));
 
   // Serial.printf("Clearing Flash: %d\n", FL_clear());
   // FL_readChar(0x0, 0x3FF);
 
-  char str[] = "This is a sample string";
-  Serial.printf("Sample Text Write: %d\n", flash.writeCharArray(0, str, strlen(str)));
-  // FL_readChar(0x0, 0x3FF);
-  // FL_readHex(0x0, FL_MAX);
 
-  uint8_t test[4096];
-  Serial.println("Start of read test");
+  // PSRAM allocation test
+  void* norm = NULL;
+  norm = malloc(10*sizeof(int));
+  Serial.printf("norm: %x\n", (int) norm);
+  free(norm);
 
-  for (uint64_t i = 0; i < 4096; i++) {
-    test[i] = flash.readByte(i, true);
+  void* ps = NULL;
+  if (!psramInit()) {
+    Serial.println("Couldn't init psram");
+    delay(7500);
+    exit(-1);
   }
-  Serial.println("Test end");
+  ps = ps_malloc(10*sizeof(int));
+  Serial.printf("ps: %x\n", (int) ps);
+  free(ps);
 
-  for (uint64_t i = 0; i < 4096; i++) {
-    if ((i % (0xFF+1)) == 0) {
-      Serial.printf("\n0x%x\t", i);
-    }
-    Serial.printf("%c", test[i]);
-  }
+  delay(2500);
+
+  heap_caps_print_heap_info(MALLOC_CAP_8BIT);
+
+  heap_caps_malloc_extmem_enable(2048);
+
+  heap_caps_print_heap_info(MALLOC_CAP_SPIRAM);
 
 
   double timeout = 0;       // Time to wait on SD card
   // Serial.printf("\nSD Init: %d\n", SD_init(timeout));
+  
+  // Flash read/write test
+  char str2[] = "This is a sample string";
+  flash.eraseChip();
+  Serial.printf("Sample Text Write: %d\n", flash.writeCharArray(0, str2, strlen(str2)));
+  FL_readChar(0, strlen(str2));
+
   Serial.println("\nNorthbridge initialized");
 }
 
