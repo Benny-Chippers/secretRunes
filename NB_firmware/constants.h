@@ -1,13 +1,14 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
-#define NUM_WAV 5
+#define NUM_WAV 6
 char* wavs[NUM_WAV] = {
   (char*) "/AIC_MitB.wav",
   (char*) "/KV_HIG.wav",
   (char*) "/meglo.wav",
   (char*) "/PB_ShSe.wav",
-  (char*) "/RA_NGGYU.wav"
+  (char*) "/RA_NGGYU.wav",
+  (char*) "/8_bit.wav"
 };
 
 const PROGMEM char long_msg[] = "This is a long message. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Ut scelerisque eleifend suscipit. Nulla elit diam, aliquet a sapien a, feugiat vulputate nulla. Ut eget odio sem. Donec sed ipsum feugiat, imperdiet quam egestas, venenatis purus. Integer a enim sit amet orci venenatis pharetra. Sed ex enim, convallis sit amet placerat a, sollicitudin eu erat. Sed ac metus lobortis, pharetra lectus vel, placerat diam. Nullam vitae nibh sit amet arcu maximus iaculis ac a diam. Proin et interdum elit. Quisque et nisi diam. Sed egestas, mi vel fermentum venenatis, odio nibh dignissim nulla, sit amet volutpat orci mauris eget ante. Nullam sit amet velit mattis, molestie purus in, commodo orci. Nunc vitae metus ac sapien congue efficitur. Vestibulum ut augue ante. Curabitur maximus nisl a posuere euismod. Nullam rhoncus leo tincidunt, facilisis augue eu, malesuada ex. Nunc tellus augue, semper vel mattis in, sodales a mauris.";

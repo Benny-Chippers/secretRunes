@@ -22,9 +22,7 @@
 #include <sdmmc_cmd.h>
 #include <esp_vfs_fat.h>
 #include <esp_heap_caps.h>
-
 #include <SoftwareSerial.h>
-#include <ESP_I2S.h>        // Possibly unneeded (if NB-SB uart streaming goes well)
 #include <SPIMemory.h>
 #include <FS.h>
 #include <SD.h>
@@ -34,16 +32,16 @@
 
 
 // Pins for Northbridge-CPU SPI
-#define VSPI_CS 5
-#define VSPI_CLK 18
-#define VSPI_MOSI 23 // aka D0
-#define VSPI_MISO 19 // aka D1
-#define VSPI_D2 21
-#define VSPI_D3 22
+#define VSPI_CS 18     // big board: 18
+#define VSPI_CLK 5     // big board: 5
+#define VSPI_MOSI 17   // (D0) big board: 17
+#define VSPI_MISO 19   // (D1) big board: 19
+#define VSPI_D2 21     // big board: 21
+#define VSPI_D3 16     // big board: 16
 
 // Pins for Northbridge-Southbridge UART
-#define UART_TX 16
-#define UART_RX 17 
+#define UART_TX 33    // old NB/MB: 16, big board: 33
+#define UART_RX 32    // old NB/MB: 17, big board: 33
 #define UART_PORT UART_NUM_2
 #define UART_BAUD 57600      // Baud Rate (symbols/sec) for NB-SB UART
 SoftwareSerial SBuart(UART_RX, UART_TX);
@@ -54,12 +52,13 @@ SoftwareSerial SBuart(UART_RX, UART_TX);
 #define HSPI_MOSI 13
 #define HSPI_MISO 12
 #define HSPI_CS_SD 26  // old NB/MB: 4, big board: 26
-#define HSPI_CS_FL 15   // old NB/MB: 15, big board: 27
-#define HSPI_CS_PS 2   // old NB/MB: 2, big board: 15
+#define HSPI_CS_FL 27   // old NB/MB: 15, big board: 27
+#define HSPI_CS_PS 15   // old NB/MB: 2, big board: 15
 #define FL_FREQ 40000000 // in Hz
 #define PS_FREQ FL_FREQ
 
 // Archaic: NB-Audio hotwiring for System Verification 1
+#include <ESP_I2S.h>        // Possibly unneeded (if NB-SB uart streaming goes well)
 #define I2S_LRC  34
 #define I2S_BCLK 36
 #define I2S_DIN  39
@@ -73,9 +72,7 @@ I2SClass i2s;
 const uint32_t BUF_SIZE = 512;  // Bytes in tx/rx buffers
 uint8_t TX_buf[BUF_SIZE];       // Tx buffer
 uint8_t RX_buf[BUF_SIZE];       // Rx buffer
-
 uint8_t UART_buf[BUF_SIZE];
-
 
 // For VSPI Configuration
 spi_host_device_t cpu_host = SPI2_HOST;
@@ -97,8 +94,8 @@ sdspi_dev_handle_t sd_handle;
 spi_bus_config_t bus_cfg;
 
 SPIFlash flash(HSPI_CS_FL, &SPI);
-SPIFlash psram(HSPI_CS_PS, &SPI);
 uint64_t FL_MAX;
+SPIFlash psram(HSPI_CS_PS, &SPI);
 uint64_t PS_MAX;
 uint32_t ret;
 
@@ -129,6 +126,25 @@ bool init_uart(const uart_port_t port, const uint32_t tx, const uint32_t rx) {
   return true;
 }
 
+// Initializes quad SPI communication
+bool init_qspi(spi_host_device_t host, spi_bus_config_t spi_bus, int d0, int d1, int d2, int d3, int clk, int cs) {
+  spi_bus.data0_io_num = d0;
+  spi_bus.data1_io_num = d1;
+  spi_bus.data2_io_num = d2;
+  spi_bus.data3_io_num = d3;
+  spi_bus.sclk_io_num = clk;
+  spi_bus.quadwp_io_num = -1;
+  spi_bus.quadhd_io_num = -1;
+
+  if (ESP_OK != spi_bus_initialize(host, &spi_bus, SPI_DMA_DISABLED)) {
+    Serial.println("Error: Couldn't initialize SPI bus in peripheral mode");
+    return false;
+  } else {
+    return true;
+  }
+}
+
+
 
 // Initializes single SPI communication
 bool init_spi(spi_host_device_t host, spi_bus_config_t spi_bus, int mosi, int miso, int clk, int cs) {
@@ -149,7 +165,7 @@ bool init_spi(spi_host_device_t host, spi_bus_config_t spi_bus, int mosi, int mi
 
 
 // // Queues a variable length SPI message to CPU. payload is message to send, length is bytes to send
-// Needs to be adapted to actually be usable..,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+// Needs to be adapted to actually be usable...
 void transmit_SPI(uint8_t* payload, uint32_t length) { 
   //   Serial.println("SPI sending message");
   //   if (length/8 < MSG_SIZE) {
@@ -282,7 +298,8 @@ size_t read_SD2buf(const char filepath[], size_t size, uint8_t* buf) {
           buf[i] = f.read();
           // i2s.write(buf[i]);
           SBuart.print((char)buf[i]);
-          // Serial.print((char)buf[i]);
+          Serial.printf("%x", buf[i]);
+
           sent++;
         } else {
           buf[i] = 0;
@@ -330,8 +347,7 @@ size_t send_MP3(const char filepath[]) {
 
       // Serial.println("made buffer");
       sent += read_SD2buf(filepath, size, (uint8_t*) buf); // Reads file to buffer
-      // Serial.println("read buffer");
-
+      Serial.println("");
       heap_caps_free((void*) buf);
     }
     
@@ -339,6 +355,7 @@ size_t send_MP3(const char filepath[]) {
 
     return size;
   } else {
+    Serial.printf("Error: %s not found\n", filepath);
     return 0;
   }
 
@@ -376,7 +393,7 @@ bool FL_clear() {
 
 void FL_readHex(uint32_t start, uint32_t end) {
   uint8_t test[end - start];
-  Serial.printf("Reading from flash:");
+  Serial.printf("Reading from flash:\n");
   flash.readByteArray(start, (uint8_t*) &test, end, true);
   for (uint32_t i = start; i < end; i++) {
     if ((i % (0xFF+1)) == 0) {
@@ -390,7 +407,7 @@ void FL_readHex(uint32_t start, uint32_t end) {
 
 void FL_readChar(uint32_t start, uint32_t end) {
   uint8_t test[end - start];
-  Serial.printf("Reading from flash:");
+  Serial.printf("Reading from flash:\n");
   flash.readByteArray(start, (uint8_t*) &test, end, true);
   for (uint32_t i = start; i < end; i++) {
     if ((i % (0xFF+1)) == 0) {
@@ -406,12 +423,12 @@ void setup() {
   Serial.begin(115200);
   pinMode(0, OUTPUT);
   randomSeed(time(NULL));
+  delay(1);
 
-  // i2s.setPins(I2S_BCLK, I2S_LRC, I2S_DIN);
+  strcpy((char*) TX_buf, "This is a SPI message from the NB to the CPU.");
 
   memset(TX_buf, '\0', BUF_SIZE);  // Prepares communication buffers
   memset(RX_buf, '\0', BUF_SIZE);
-  strcpy((char*) TX_buf, "This is a SPI message from the NB to the CPU.");
   SBuart.begin(UART_BAUD);
 
   Serial.println("HSPI Init...");
@@ -424,22 +441,14 @@ void setup() {
   FL_MAX = flash.getCapacity();
   Serial.printf("%d kB Capacity\n", FL_MAX/1000);
   
-
   // Initalizing PSRAM (in-progress)
   SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_PS);
-  // SPI();
   ret = psram.begin(8000000);                     
   PS_MAX = psram.getCapacity();
   Serial.printf("\nPSRAM Init: %d, cap: %d\n", ret, PS_MAX);
   psram.setClock(PS_FREQ);
-  // Serial.printf("Start RAM: %u\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
-  // Serial.printf("PSRAM: %u\n", ESP.getFreeHeap());
   char str[] = "This is a sample string"; 
   psram.writeCharArray(0, str, strlen(str));
-
-  // Serial.printf("Clearing Flash: %d\n", FL_clear());
-  // FL_readChar(0x0, 0x3FF);
-
 
   // PSRAM allocation test
   void* norm = NULL;
@@ -447,33 +456,35 @@ void setup() {
   Serial.printf("norm: %x\n", (int) norm);
   free(norm);
 
+  // SD initialization
+  double timeout = 0;       // Time to wait on SD card
+  Serial.printf("\nSD Init: %d\n", SD_init(timeout));
+
   void* ps = NULL;
   if (!psramInit()) {
     Serial.println("Couldn't init psram");
-    delay(7500);
-    exit(-1);
+    delay(1000);
   }
   ps = ps_malloc(10*sizeof(int));
   Serial.printf("ps: %x\n", (int) ps);
   free(ps);
 
-  delay(2500);
 
-  heap_caps_print_heap_info(MALLOC_CAP_8BIT);
-
-  heap_caps_malloc_extmem_enable(2048);
-
-  heap_caps_print_heap_info(MALLOC_CAP_SPIRAM);
+  // delay(2500)
+  // heap_caps_print_heap_info(MALLOC_CAP_8BIT);
+  // heap_caps_malloc_extmem_enable(2048);
+  // heap_caps_print_heap_info(MALLOC_CAP_SPIRAM);
 
 
-  double timeout = 0;       // Time to wait on SD card
-  // Serial.printf("\nSD Init: %d\n", SD_init(timeout));
+
+
+
   
-  // Flash read/write test
-  char str2[] = "This is a sample string";
-  flash.eraseChip();
-  Serial.printf("Sample Text Write: %d\n", flash.writeCharArray(0, str2, strlen(str2)));
-  FL_readChar(0, strlen(str2));
+  // // Flash read/write test
+  // char str2[] = "This is a sample string";
+  // FL_clear();
+  // Serial.printf("Sample Text Write: %d\n", flash.writeCharArray(0, str2, strlen(str2)));
+  // FL_readChar(0, strlen(str2));
 
   Serial.println("\nNorthbridge initialized");
 }
@@ -488,8 +499,10 @@ void loop() {
   spi_transaction_t message;        // Transaction struct
   memset(&message, 0, sizeof(message));
   
+  int idx = random(0, NUM_WAV-1);
+  delay(1);
+  send_MP3(wavs[idx]);
 
-  
   // message = {
   //   .flags = 0,
   //   .length = MSG_SIZE,
