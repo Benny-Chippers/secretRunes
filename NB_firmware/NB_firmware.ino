@@ -459,7 +459,7 @@ void setup() {
   ret = flash.begin(MB(16));
   Serial.printf("\nFlash Init: %d\n", ret);
   FL_MAX = flash.getCapacity();
-  // flash.setClock(FL_FREQ);
+  flash.setClock(FL_FREQ);
   Serial.printf("%d kB Capacity\n", FL_MAX/1000);
   
   // // Initalizing PSRAM (in-progress, not yet working)
@@ -501,9 +501,9 @@ void setup() {
   char str2[] = "This is a sample string";
 
   FL_clear();
-  delay(1000);
+  // delay(1000);
   Serial.printf("Sample Text Write: %d\n", flash.writeCharArray(0, str2, strlen(str2)));
-  delay(100);
+  // delay(100);
   FL_readChar(0, strlen(str2));
   SPI.end();
 
@@ -526,8 +526,7 @@ void loop() {
   memset(RX_buf, '\0', BUF_SIZE);
   strcpy((char*) TX_buf, "This is a SPI message from the NB to the CPU.");
   
-  spi_transaction_t message;        // Transaction struct
-  memset(&message, 0, sizeof(message));
+  // memset(&message, 0, sizeof(message));
     
   // Tests NB-SB UART Music streaming
   {
@@ -535,22 +534,21 @@ void loop() {
     delay(1);
     send_MP3(wavs[idx], 2.5);
   }
+  spi_transaction_t message;        // Transaction struct
 
-  message = {
-    .flags = 0,
-    .length = MSG_SIZE,
-    .trans_len = MSG_SIZE,
-    .tx_buffer = (void*) &TX_buf,
-    .rx_buffer = (void*) &RX_buf,
-    .user = (void*) msg_idx++,
-  };
+  message.flags = 0;
+  message.length = MSG_SIZE;
+  // message.trans_len = MSG_SIZE;
+  message.tx_buffer = (void*) &TX_buf;
+  message.rx_buffer = (void*) &RX_buf;
+  message.user = (void*) msg_idx++;
 
   // Queues message
-  spi_slave_queue_trans(host, &message, portMAX_DELAY);
+  spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY);
 
   // Currently, this holds until the SPI transaction completes (polling)
   // May implement multi-core usage/communication interrupts later
-  if(ESP_OK != spi_slave_get_trans_result(host, (spi_slave_transaction_t**)&message, portMAX_DELAY)) {
+  if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&message, portMAX_DELAY)) {
     Serial.println("Error: couldn't receive message");
     return;
   }
