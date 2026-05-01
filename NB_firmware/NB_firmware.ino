@@ -36,10 +36,10 @@
 // Pins for Northbridge-CPU SPI
 #define VSPI_CS 18     // big board: 18
 #define VSPI_CLK 5     // big board: 5
-#define VSPI_MOSI 17   // (D0) big board: 17
+#define VSPI_MOSI 23   // (D0) old NB/MB: 23, big board: 17
 #define VSPI_MISO 19   // (D1) big board: 19
 #define VSPI_D2 21     // big board: 21
-#define VSPI_D3 16     // big board: 16
+#define VSPI_D3 22     // old NB/MB: 22, big board: 16
 
 // Pins for Northbridge-Southbridge UART
 #define UART_TX 33    // old NB/MB: 16, big board: 33
@@ -71,13 +71,13 @@ I2SClass i2s;
 
 
 #define MSG_SIZE 512
-const uint32_t BUF_SIZE = 512;  // Bytes in tx/rx buffers
+const uint32_t BUF_SIZE = 512/8;  // Bytes in tx/rx buffers
 uint8_t TX_buf[BUF_SIZE];       // Tx buffer
 uint8_t RX_buf[BUF_SIZE];       // Rx buffer
 uint8_t UART_buf[BUF_SIZE];
 
 // For VSPI Configuration
-spi_host_device_t cpu_host = SPI2_HOST;
+spi_host_device_t cpu_host = SPI3_HOST;
 spi_bus_config_t cpu_bus;
 spi_slave_interface_config_t peripheral_config;
 spi_dma_chan_t dma_config = SPI_DMA_DISABLED;
@@ -134,32 +134,39 @@ bool init_uart(const uart_port_t port, const uint32_t tx, const uint32_t rx) {
 
 // Initializes quad SPI communication.
 bool init_qspi(spi_host_device_t host, spi_bus_config_t spi_bus, int d0, int d1, int d2, int d3, int clk, int cs) {
-  spi_bus.data0_io_num = d0;
-  spi_bus.data1_io_num = d1;
-  spi_bus.data2_io_num = d2;
-  spi_bus.data3_io_num = d3;
+  // spi_bus.data0_io_num = d0;
+  // spi_bus.data1_io_num = d1;
+  // spi_bus.data2_io_num = d2;
+  // spi_bus.data3_io_num = d3;
+  spi_bus.mosi_io_num = VSPI_MOSI;
+  spi_bus.miso_io_num = VSPI_MISO;
+  spi_bus.quadwp_io_num = VSPI_D2;
+  spi_bus.quadhd_io_num = VSPI_D3;
+  
+
   spi_bus.sclk_io_num = clk;
-  spi_bus.quadwp_io_num = -1;
-  spi_bus.quadhd_io_num = -1;
   
   peripheral_config = {
     .spics_io_num = cs,
-    .flags = 0,
+    .flags = SPI_DEVICE_HALFDUPLEX,
     .queue_size = 1024,
     .mode = 0,
     .post_setup_cb = 0,
     .post_trans_cb = 0,
   };
   
-  if (ESP_OK != spi_bus_initialize(host, &spi_bus, SPI_DMA_DISABLED)) {
-    Serial.println("Error: Couldn't initialize NB as a QSPI peripheral");
-    return false;
-  }
+  // if (ESP_OK != spi_bus_initialize(host, &spi_bus, 0)) {
+  //   Serial.println("Error: Couldn't initialize NB as a QSPI peripheral");
+  //   return false;
+  // }
+
+  Serial.println("Bus initialized");
 
   if (ESP_OK != spi_slave_initialize(host, &spi_bus, &peripheral_config, SPI_DMA_DISABLED)) {
     Serial.println("Error: Couldn't initialize NB as a QSPI peripheral");
     return false;
   } 
+  Serial.println("Device initialized");
   return true;
 }
 
@@ -459,7 +466,7 @@ void setup() {
   ret = flash.begin(MB(16));
   Serial.printf("\nFlash Init: %d\n", ret);
   FL_MAX = flash.getCapacity();
-  flash.setClock(FL_FREQ);
+  // // flash.setClock(FL_FREQ);
   Serial.printf("%d kB Capacity\n", FL_MAX/1000);
   
   // // Initalizing PSRAM (in-progress, not yet working)
@@ -495,26 +502,23 @@ void setup() {
   // heap_caps_malloc_extmem_enable(2048);
   // heap_caps_print_heap_info(MALLOC_CAP_SPIRAM);
 
-  // Serial.printf("Init QSPI: %d\n", init_qspi(cpu_host, cpu_bus, VSPI_MOSI, VSPI_MISO, VSPI_D2, VSPI_D3, VSPI_CLK, VSPI_CS));
+  Serial.printf("Init QSPI: %d\n", init_qspi(cpu_host, cpu_bus, VSPI_MOSI, VSPI_MISO, VSPI_D2, VSPI_D3, VSPI_CLK, VSPI_CS));
 
   // Flash read/write test
   char str2[] = "This is a sample string";
 
-  FL_clear();
-  // delay(1000);
-  Serial.printf("Sample Text Write: %d\n", flash.writeCharArray(0, str2, strlen(str2)));
-  // delay(100);
-  FL_readChar(0, strlen(str2));
-  SPI.end();
-
+  // FL_clear();
   // delay(100);
 
-  FL_readChar(0, strlen(str2));
+  // FL_readChar(0, strlen(str2));
+  // ret = 0;
+  // int i = 0;
+  // ret = flash.writeCharArray(0, str2, strlen(str2), true);
+  // Serial.printf("Sample Text Write: %d\n", ret);
 
-  SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_FL);
+  // delay(100);
+  // FL_readChar(0, strlen(str2));
 
-
-  FL_readChar(0, strlen(str2));
   
   Serial.println("\nNorthbridge initialized");
 }
@@ -524,37 +528,48 @@ void setup() {
 void loop() {
   memset(TX_buf, '\0', BUF_SIZE);  // Prepares communication buffers
   memset(RX_buf, '\0', BUF_SIZE);
-  strcpy((char*) TX_buf, "This is a SPI message from the NB to the CPU.");
+  strcpy((char*) TX_buf, "Writing from NB");
   
-  // memset(&message, 0, sizeof(message));
     
   // Tests NB-SB UART Music streaming
   {
-    int idx = random(0, NUM_WAV-1);
-    delay(1);
-    send_MP3(wavs[idx], 2.5);
+    // int idx = random(0, NUM_WAV-1);
+    // delay(1);
+    // send_MP3(wavs[idx], 2.5);
   }
-  spi_transaction_t message;        // Transaction struct
 
+  spi_slave_transaction_t message;        // Transaction struct
+  memset(&message, 0, sizeof(message));
   message.flags = 0;
   message.length = MSG_SIZE;
-  // message.trans_len = MSG_SIZE;
-  message.tx_buffer = (void*) &TX_buf;
+  message.trans_len = 2*MSG_SIZE;
+  message.tx_buffer = (void*) NULL;
   message.rx_buffer = (void*) &RX_buf;
   message.user = (void*) msg_idx++;
 
   // Queues message
-  spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY);
+  if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
+    Serial.println("Error: couldn't queue message");
+    // return;
+  }
+
+  delay(1000);
 
   // Currently, this holds until the SPI transaction completes (polling)
   // May implement multi-core usage/communication interrupts later
   if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&message, portMAX_DELAY)) {
     Serial.println("Error: couldn't receive message");
-    return;
+    // return;
   }
   // Prints received data
   Serial.print("SPI CPU: ");
-  Serial.println((char*) RX_buf);
+  // Serial.printf("%s\n",(char*) RX_buf);
+  for (int i = 0; i < MSG_SIZE; i++) {
+    Serial.printf("%x", (int) RX_buf[i]);
+  }
+  Serial.println(" ");
+
+
 
   // // Tests UART NB->SB Communication
   // memset(UART_buf, '\0', BUF_SIZE);
@@ -568,5 +583,5 @@ void loop() {
   // Serial.println((char*) UART_buf);
   // uart_flush(UART_PORT);
 
-  // delay(1000);
+  delay(1000);
 }

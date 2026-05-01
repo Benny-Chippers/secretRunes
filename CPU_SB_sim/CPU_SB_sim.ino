@@ -8,17 +8,19 @@
 #include <driver/spi_master.h>
 #include <driver/uart.h>
 
-#define VSPI_CS 5
 #define VSPI_CLK 18
+#define VSPI_CS 5
 #define VSPI_MOSI 23    // D0
 #define VSPI_MISO 19    // D1
+#define VSPI_D2 21
+#define VSPI_D3 22
 
 #define UART_TX 16
 #define UART_RX 17
 #define UART_PORT UART_NUM_1
 #define UART_BAUD 9600
 
-const uint32_t BUF_SIZE = 512;
+const uint32_t BUF_SIZE = 512/8;
 uint8_t TX_buf[BUF_SIZE];
 uint8_t RX_buf[BUF_SIZE];
 uint8_t UART_buf[BUF_SIZE];
@@ -40,10 +42,20 @@ void setup() {
   Serial.begin(115200);
   memset(&vspi, 0, sizeof(vspi));
   vspi.sclk_io_num = VSPI_CLK;
+  // vspi.data0_io_num = VSPI_MOSI;
+  // vspi.data1_io_num = VSPI_MISO;
+  // vspi.data2_io_num = VSPI_D2;
+  // vspi.data3_io_num = VSPI_D3;
+
+
+  vspi.flags = 0;
+  vspi.max_transfer_sz = 4096;
+
   vspi.mosi_io_num = VSPI_MOSI;           // Bus Configuration
   vspi.miso_io_num = VSPI_MISO;
-  vspi.quadwp_io_num = -1;
-  vspi.quadhd_io_num = -1;
+  vspi.quadwp_io_num = VSPI_D2;
+  vspi.quadhd_io_num = VSPI_D3;
+  
   vspi.max_transfer_sz = 4094;
 
   if (ESP_OK != spi_bus_initialize(host_config, &vspi, dma_config)) {
@@ -51,14 +63,18 @@ void setup() {
     return;
   }
 
+  memset(&guest_config, 0, sizeof(guest_config));
+
   guest_config = {
     .command_bits = 0,          // should be 6
     .address_bits = 0,         // should be 26
     .dummy_bits = 0,
     .mode = 0,
-    .clock_speed_hz = 1*1000,
+    .clock_speed_hz = 1*100s00,
     .spics_io_num = VSPI_CS,
-    .queue_size = 10,
+    .flags = SPI_DEVICE_HALFDUPLEX,
+    // .flags = 0,
+    .queue_size = 1024,
   };
   
   if (ESP_OK != spi_bus_add_device(host_config, &guest_config, &guest_name)) {
@@ -67,73 +83,46 @@ void setup() {
   }
   Serial.println("\nCPU Initialized");
 
-  uart_config = {
-    .baud_rate = UART_BAUD,
-    .data_bits = UART_DATA_8_BITS,
-    .parity = UART_PARITY_DISABLE,
-    .stop_bits = UART_STOP_BITS_1,
-    .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-  };
-  
-  if (ESP_OK != uart_driver_install(UART_PORT, BUF_SIZE, BUF_SIZE, 10, &uart_queue, 0)) {
-    Serial.println("Error: Couldn't add UART");
-  }
-  if (ESP_OK != uart_param_config(UART_PORT, &uart_config)) {
-    Serial.println("Error: Couldn't add UART");
-  }
-  if (ESP_OK != uart_set_pin(UART_PORT, UART_TX, UART_RX, 0, 0)) {
-    Serial.println("Error: Couldn't add UART");
-  }
-
-  Serial.println("Southbridge Initialized");
-  while (1) {
-    // Tests NB->SB Communication
-    memset(mp3_buf, '\0', 1024);
-    uart_read_bytes(UART_PORT, (char*) mp3_buf,  1024, 10000000);
-    
-    Serial.printf("Incoming data: ");
-    Serial.println((char*) mp3_buf);
-  }
 }
 
 void loop() {
-  // memset(TX_buf, '\0', BUF_SIZE);  // Prepares communication buffers
-  // memset(RX_buf, '\0', BUF_SIZE);
-  // strcpy((char*) TX_buf, "This is a SPI message from the CPU to the NB.");
-  // // // strcpy((char*) RX_buf, "                               ");
+  memset(TX_buf, '\0', BUF_SIZE);  // Prepares communication buffers
+  memset(RX_buf, '\0', BUF_SIZE);
+  
+  // memset((TX_buf), 0xF, 4);
+  
+  
+  memset(RX_buf, '\0', BUF_SIZE);
+  strcpy((char*) TX_buf, "f f f x x x ");
+  // strcpy((char*) RX_buf, "hey rx    ");
 
-  // // To send data to peripheral, make a spi_transaction_t struct and
-  // // call spi_device_queue_trans/spi_device_get_trans_result or spi_device_transmit
-  // spi_transaction_t message;
-  // memset(&message, 0, sizeof(message));
+  // To send data to peripheral, make a spi_transaction_t struct and
+  // call spi_device_queue_trans/spi_device_get_trans_result or spi_device_transmit
+  spi_transaction_t message;
+  memset(&message, 0, sizeof(message));
 
-  // message.flags = 0;
-  // message.length = 512;
-  // message.tx_buffer = (void*) TX_buf;
-  // message.rx_buffer = (void*) RX_buf;
+  // Serial.println("before flags");
+  message.flags = SPI_TRANS_MODE_QIO;
+  message.length = 512;
+  // message.mode = 
+  message.tx_buffer = (void*) &TX_buf;
+  message.rx_buffer = (void*) NULL;
   // message.cmd = 0b00110000;
   // message.addr = 0x00FF00FF00;
-  // message.user = (void*) 1;
+  message.user = (void*) 1;
 
-  // Serial.print("cmd: 0b");
-  // Serial.print(0x0F, BIN);
-  // Serial.println("");
-  // Serial.print("addr: 0b");
-  // Serial.print(0x00FF00FF00, BIN);
-  // Serial.println("");
   
-
-  // // SPI Transmission
-  // if (ESP_OK != spi_device_transmit(guest_name, &message)) {
-  //   Serial.println("Error: Couldn't transmit message");
-  //   return;
-  // }
+  // SPI Transmission
+  if (ESP_OK != spi_device_transmit(guest_name, &message)) {
+    Serial.println("Error: Couldn't transmit message");
+    return;
+  }
   
   // // if (strcmp((char*) RX_buf, "This is a SPI message from the CPU to the NB.")) {
-  // Serial.print("SPI NB: ");
-  // Serial.println((char*)RX_buf);
+  Serial.print("SPI NB: ");
+  Serial.printf("%s, 0x%x\n", (char*)RX_buf, (int*) RX_buf);
   // // }
-  // // Serial.println((char*)TX_buf);
+  // Serial.println((char*)TX_buf);
 
 
   // Tests SB->NB Communication
@@ -146,5 +135,5 @@ void loop() {
 
   // strcpy((char*) UART_buf, "This is a UART message from the SB to the NB. \n");
 
-  // delay(800);
+  delay(2000);
 }
