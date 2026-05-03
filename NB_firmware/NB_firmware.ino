@@ -36,10 +36,10 @@
 // Pins for Northbridge-CPU SPI
 #define VSPI_CS 18     // big board: 18
 #define VSPI_CLK 5     // big board: 5
-#define VSPI_MOSI 23   // (D0) old NB/MB: 23, big board: 17
+#define VSPI_MOSI 17   // (D0) old NB/MB: 23, big board: 17
 #define VSPI_MISO 19   // (D1) big board: 19
 #define VSPI_D2 21     // big board: 21
-#define VSPI_D3 22     // old NB/MB: 22, big board: 16
+#define VSPI_D3 16     // old NB/MB: 22, big board: 16
 
 // Pins for Northbridge-Southbridge UART
 #define UART_TX 33    // old NB/MB: 16, big board: 33
@@ -54,9 +54,9 @@ SoftwareSerial SBuart(UART_RX, UART_TX);
 #define HSPI_MOSI 13
 #define HSPI_MISO 12
 #define HSPI_CS_SD 26  // old NB/MB: 4, big board: 26
-#define HSPI_CS_FL 15   // old NB/MB: 15, big board: 27
-#define HSPI_CS_PS 2   // old NB/MB: 2, big board: 15
-#define FL_FREQ 40000000 // in Hz
+#define HSPI_CS_FL 27   // old NB/MB: 15, big board: 27
+#define HSPI_CS_PS 15   // old NB/MB: 2, big board: 15
+#define FL_FREQ 1000 // in Hz
 #define PS_FREQ FL_FREQ
 
 // Archaic: NB-Audio hotwiring for System Verification 1
@@ -96,8 +96,8 @@ sdspi_dev_handle_t sd_handle;
 spi_bus_config_t bus_cfg;
 
 
-SPIClass* fl = NULL;
-SPIClass* ps = NULL;
+SPIClass* fl;
+SPIClass* ps;
 SPIFlash flash(HSPI_CS_FL);
 uint64_t FL_MAX;
 SPIFlash psram(HSPI_CS_PS);
@@ -132,7 +132,7 @@ bool init_uart(const uart_port_t port, const uint32_t tx, const uint32_t rx) {
 }
 
 
-// Initializes quad SPI communication.
+// Initializes quad SPI communication
 bool init_qspi(spi_host_device_t host, spi_bus_config_t spi_bus, int d0, int d1, int d2, int d3, int clk, int cs) {
   // spi_bus.data0_io_num = d0;
   // spi_bus.data1_io_num = d1;
@@ -146,11 +146,12 @@ bool init_qspi(spi_host_device_t host, spi_bus_config_t spi_bus, int d0, int d1,
 
   spi_bus.sclk_io_num = clk;
   
+  // Need sample on rising, output on falling (clock idle is high)
   peripheral_config = {
     .spics_io_num = cs,
     .flags = SPI_DEVICE_HALFDUPLEX,
     .queue_size = 1024,
-    .mode = 0,
+    .mode = 3,
     .post_setup_cb = 0,
     .post_trans_cb = 0,
   };
@@ -432,9 +433,14 @@ void FL_readHex(uint32_t start, uint32_t end) {
 
 
 void FL_readChar(uint32_t start, uint32_t end) {
-  uint8_t test[end - start];
+  uint8_t test[end - start] = {0};
   Serial.printf("Reading from flash:\n");
-  flash.readByteArray(start, (uint8_t*) &test, end, true);
+  ret = 0;
+  ret = flash.readByteArray(start, (uint8_t*) &test, (end-start), true);
+  if (!ret) {
+    Serial.println("Error: Couldn't read flash");
+    return;
+  }
   for (uint32_t i = start; i < end; i++) {
     if ((i % (0xFF+1)) == 0) {
       Serial.printf("\n0x%x\t", i);
@@ -458,15 +464,13 @@ void setup() {
 
   Serial.println("HSPI Init...");
   
-  // Initializing flash memory
 
-  // External SPI is causing an issue with internal flash when resetting
-  // TODO: to turn SPI on when needed but off when done
+  // Initializing flash memory
   SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_FL);
   ret = flash.begin(MB(16));
-  Serial.printf("\nFlash Init: %d\n", ret);
+  Serial.printf("\nFlash Init: %d\t\tJEDEC ID: 0x%x\n", ret, flash.getJEDECID());
   FL_MAX = flash.getCapacity();
-  // // flash.setClock(FL_FREQ);
+  flash.setClock(FL_FREQ);
   Serial.printf("%d kB Capacity\n", FL_MAX/1000);
   
   // // Initalizing PSRAM (in-progress, not yet working)
@@ -478,11 +482,11 @@ void setup() {
   // char str[] = "This is a sample string"; 
   // psram.writeCharArray(0, str, strlen(str));
 
-  // PSRAM allocation test
-  void* norm = NULL;
-  norm = malloc(10*sizeof(int));
-  Serial.printf("norm: %x\n", (int) norm);
-  free(norm);
+  // // PSRAM allocation test
+  // void* norm = NULL;
+  // norm = malloc(10*sizeof(int));
+  // Serial.printf("norm: %x\n", (int) norm);
+  // free(norm);
 
   // // SD initialization
   // double timeout = 0;       // Time to wait on SD card
@@ -502,25 +506,30 @@ void setup() {
   // heap_caps_malloc_extmem_enable(2048);
   // heap_caps_print_heap_info(MALLOC_CAP_SPIRAM);
 
-  Serial.printf("Init QSPI: %d\n", init_qspi(cpu_host, cpu_bus, VSPI_MOSI, VSPI_MISO, VSPI_D2, VSPI_D3, VSPI_CLK, VSPI_CS));
 
   // Flash read/write test
   char str2[] = "This is a sample string";
 
-  // FL_clear();
-  // delay(100);
 
-  // FL_readChar(0, strlen(str2));
-  // ret = 0;
-  // int i = 0;
-  // ret = flash.writeCharArray(0, str2, strlen(str2), true);
-  // Serial.printf("Sample Text Write: %d\n", ret);
+  FL_readChar(10, 10+strlen(str2));
+  FL_clear();
+  // delay(5000);
 
-  // delay(100);
-  // FL_readChar(0, strlen(str2));
+  ret = 0;
+  int i = 0;
+  ret = flash.writeCharArray(10, str2, 10+strlen(str2), true);
+
+
+  Serial.printf("Sample Text Write: %d\n", ret);
+  FL_readChar(10, 10+strlen(str2));
+  delay(100);
 
   
+
+
+
   Serial.println("\nNorthbridge initialized");
+  Serial.printf("Init QSPI: %d\n", init_qspi(cpu_host, cpu_bus, VSPI_MOSI, VSPI_MISO, VSPI_D2, VSPI_D3, VSPI_CLK, VSPI_CS));
 }
 
 
@@ -562,10 +571,13 @@ void loop() {
     // return;
   }
   // Prints received data
-  Serial.print("SPI CPU: ");
+  // Serial.print("SPI CPU3.0: ");
   // Serial.printf("%s\n",(char*) RX_buf);
   for (int i = 0; i < MSG_SIZE; i++) {
     Serial.printf("%x", (int) RX_buf[i]);
+    if (RX_buf[i] == '\0') {
+      break;
+    }
   }
   Serial.println(" ");
 

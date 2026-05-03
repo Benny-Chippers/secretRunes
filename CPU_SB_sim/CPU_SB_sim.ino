@@ -28,7 +28,7 @@ uint8_t mp3_buf[1024];
 
 // for SPI Configuration
 spi_bus_config_t vspi;
-spi_host_device_t host_config = SPI2_HOST; // Selecting SPI3: VSPI
+spi_host_device_t host_config = SPI3_HOST; // Selecting SPI3: VSPI
 spi_device_interface_config_t guest_config;
 spi_device_handle_t guest_name;
 spi_dma_chan_t dma_config = SPI_DMA_DISABLED;
@@ -66,11 +66,11 @@ void setup() {
   memset(&guest_config, 0, sizeof(guest_config));
 
   guest_config = {
-    .command_bits = 0,          // should be 6
-    .address_bits = 0,         // should be 26
+    .command_bits = 6,          // should be 6
+    .address_bits = 26,         // should be 26
     .dummy_bits = 0,
-    .mode = 0,
-    .clock_speed_hz = 1*100s00,
+    .mode = 3,
+    .clock_speed_hz = 1*10000,
     .spics_io_num = VSPI_CS,
     .flags = SPI_DEVICE_HALFDUPLEX,
     // .flags = 0,
@@ -107,8 +107,8 @@ void loop() {
   // message.mode = 
   message.tx_buffer = (void*) &TX_buf;
   message.rx_buffer = (void*) NULL;
-  // message.cmd = 0b00110000;
-  // message.addr = 0x00FF00FF00;
+  message.cmd = 0b00110000;
+  message.addr = 0x00FF00FF00;
   message.user = (void*) 1;
 
   
@@ -120,7 +120,7 @@ void loop() {
   
   // // if (strcmp((char*) RX_buf, "This is a SPI message from the CPU to the NB.")) {
   Serial.print("SPI NB: ");
-  Serial.printf("%s, 0x%x\n", (char*)RX_buf, (int*) RX_buf);
+  Serial.printf("%s\n", (char*)RX_buf);
   // // }
   // Serial.println((char*)TX_buf);
 
