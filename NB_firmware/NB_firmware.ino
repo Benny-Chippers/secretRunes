@@ -34,12 +34,12 @@
 
 
 // Pins for Northbridge-CPU SPI
-#define VSPI_CS 18     // big board: 18
-#define VSPI_CLK 5     // big board: 5
-#define VSPI_MOSI 17   // (D0) old NB/MB: 23, big board: 17
+#define VSPI_CLK 18     // big board: 5
+#define VSPI_CS 5     // big board: 18
+#define VSPI_MOSI 23   // (D0) old NB/MB: 23, big board: 17
 #define VSPI_MISO 19   // (D1) big board: 19
 #define VSPI_D2 21     // big board: 21
-#define VSPI_D3 16     // old NB/MB: 22, big board: 16
+#define VSPI_D3 22     // old NB/MB: 22, big board: 16
 
 // Pins for Northbridge-Southbridge UART
 #define UART_TX 33    // old NB/MB: 16, big board: 33
@@ -78,7 +78,7 @@ uint8_t UART_buf[BUF_SIZE];
 
 // For VSPI Configuration
 spi_host_device_t cpu_host = SPI3_HOST;
-spi_bus_config_t cpu_bus;
+spi_bus_config_t spi_bus;
 spi_slave_interface_config_t peripheral_config;
 spi_dma_chan_t dma_config = SPI_DMA_DISABLED;
 int msg_idx;
@@ -133,7 +133,7 @@ bool init_uart(const uart_port_t port, const uint32_t tx, const uint32_t rx) {
 
 
 // Initializes quad SPI communication
-bool init_qspi(spi_host_device_t host, spi_bus_config_t spi_bus, int d0, int d1, int d2, int d3, int clk, int cs) {
+bool init_qspi(spi_host_device_t host, int d0, int d1, int d2, int d3, int clk, int cs) {
   // spi_bus.data0_io_num = d0;
   // spi_bus.data1_io_num = d1;
   // spi_bus.data2_io_num = d2;
@@ -151,7 +151,7 @@ bool init_qspi(spi_host_device_t host, spi_bus_config_t spi_bus, int d0, int d1,
     .spics_io_num = cs,
     .flags = SPI_DEVICE_HALFDUPLEX,
     .queue_size = 1024,
-    .mode = 3,
+    .mode = 0,                        // Need 3
     .post_setup_cb = 0,
     .post_trans_cb = 0,
   };
@@ -511,32 +511,32 @@ void setup() {
   char str2[] = "This is a sample string";
 
 
-  FL_readChar(10, 10+strlen(str2));
-  FL_clear();
-  // delay(5000);
+  // FL_readChar(10, 10+strlen(str2));
+  // FL_clear();
+  // // delay(5000);
 
-  ret = 0;
-  int i = 0;
-  ret = flash.writeCharArray(10, str2, 10+strlen(str2), true);
+  // ret = 0;
+  // int i = 0;
+  // ret = flash.writeCharArray(10, str2, 10+strlen(str2), true);
 
 
-  Serial.printf("Sample Text Write: %d\n", ret);
-  FL_readChar(10, 10+strlen(str2));
-  delay(100);
+  // Serial.printf("Sample Text Write: %d\n", ret);
+  // FL_readChar(10, 10+strlen(str2));
+  // delay(100);
 
   
 
 
 
   Serial.println("\nNorthbridge initialized");
-  Serial.printf("Init QSPI: %d\n", init_qspi(cpu_host, cpu_bus, VSPI_MOSI, VSPI_MISO, VSPI_D2, VSPI_D3, VSPI_CLK, VSPI_CS));
+  Serial.printf("Init QSPI: %d\n", init_qspi(cpu_host, VSPI_MOSI, VSPI_MISO, VSPI_D2, VSPI_D3, VSPI_CLK, VSPI_CS));
 }
 
 
 
 void loop() {
-  memset(TX_buf, '\0', BUF_SIZE);  // Prepares communication buffers
-  memset(RX_buf, '\0', BUF_SIZE);
+  memset(TX_buf, 0xFF, BUF_SIZE);  // Prepares communication buffers
+  memset(RX_buf, 0xFF, BUF_SIZE);
   strcpy((char*) TX_buf, "Writing from NB");
   
     
@@ -549,10 +549,9 @@ void loop() {
 
   spi_slave_transaction_t message;        // Transaction struct
   memset(&message, 0, sizeof(message));
-  message.flags = 0;
-  message.length = MSG_SIZE;
-  message.trans_len = 2*MSG_SIZE;
-  message.tx_buffer = (void*) NULL;
+  message.flags = SPI_TRANS_MODE_QIO;
+  message.length = 8*BUF_SIZE;
+  message.tx_buffer = (void*) 0;
   message.rx_buffer = (void*) &RX_buf;
   message.user = (void*) msg_idx++;
 
@@ -562,7 +561,7 @@ void loop() {
     // return;
   }
 
-  delay(1000);
+  // delay(1000);
 
   // Currently, this holds until the SPI transaction completes (polling)
   // May implement multi-core usage/communication interrupts later
@@ -570,16 +569,17 @@ void loop() {
     Serial.println("Error: couldn't receive message");
     // return;
   }
+
   // Prints received data
-  // Serial.print("SPI CPU3.0: ");
-  // Serial.printf("%s\n",(char*) RX_buf);
-  for (int i = 0; i < MSG_SIZE; i++) {
-    Serial.printf("%x", (int) RX_buf[i]);
-    if (RX_buf[i] == '\0') {
-      break;
-    }
-  }
-  Serial.println(" ");
+  Serial.print("SPI CPU: ");
+  Serial.printf("%s\n",(char*) RX_buf);
+  // for (int i = 0; i < BUF_SIZE; i++) {
+  //   Serial.printf("%x", (int) RX_buf[i]);
+  //   if (RX_buf[i] == '\0') {
+  //     break;
+  //   }
+  // }
+  // Serial.println(" ");
 
 
 

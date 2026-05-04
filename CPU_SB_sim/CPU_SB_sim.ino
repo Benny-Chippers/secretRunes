@@ -1,8 +1,6 @@
 /* Author: Damian Amerman-Smith
  * Testscript to simulate the CPU and SB for transmitting to the NB
  */
-
-
 #include <Arduino.h>
 #include <HardwareSerial.h>
 #include <driver/spi_master.h>
@@ -66,10 +64,10 @@ void setup() {
   memset(&guest_config, 0, sizeof(guest_config));
 
   guest_config = {
-    .command_bits = 6,          // should be 6
-    .address_bits = 26,         // should be 26
+    .command_bits = 0,          // should be 6
+    .address_bits = 0,         // should be 26
     .dummy_bits = 0,
-    .mode = 3,
+    .mode = 0,
     .clock_speed_hz = 1*10000,
     .spics_io_num = VSPI_CS,
     .flags = SPI_DEVICE_HALFDUPLEX,
@@ -86,8 +84,8 @@ void setup() {
 }
 
 void loop() {
-  memset(TX_buf, '\0', BUF_SIZE);  // Prepares communication buffers
-  memset(RX_buf, '\0', BUF_SIZE);
+  memset(TX_buf, 0xFF, BUF_SIZE);  // Prepares communication buffers
+  memset(RX_buf, 0xFF, BUF_SIZE);
   
   // memset((TX_buf), 0xF, 4);
   
@@ -106,9 +104,9 @@ void loop() {
   message.length = 512;
   // message.mode = 
   message.tx_buffer = (void*) &TX_buf;
-  message.rx_buffer = (void*) NULL;
-  message.cmd = 0b00110000;
-  message.addr = 0x00FF00FF00;
+  message.rx_buffer = (void*) 0;
+  // message.cmd = 0b00110000;
+  // message.addr = 0x00FF00FF00;
   message.user = (void*) 1;
 
   
