@@ -64,8 +64,8 @@ void setup() {
   memset(&guest_config, 0, sizeof(guest_config));
 
   guest_config = {
-    .command_bits = 0,          // should be 6
-    .address_bits = 0,         // should be 26
+    .command_bits = 8,          // should be 6
+    .address_bits = 24,         // should be 26
     .dummy_bits = 0,
     .mode = 0,
     .clock_speed_hz = 1*10000,
@@ -83,44 +83,80 @@ void setup() {
 
 }
 
-void loop() {
-  memset(TX_buf, 0xFF, BUF_SIZE);  // Prepares communication buffers
-  memset(RX_buf, 0xFF, BUF_SIZE);
-  
-  // memset((TX_buf), 0xF, 4);
-  
-  
-  memset(RX_buf, '\0', BUF_SIZE);
-  strcpy((char*) TX_buf, "f f f x x x ");
-  // strcpy((char*) RX_buf, "hey rx    ");
 
-  // To send data to peripheral, make a spi_transaction_t struct and
+
+bool cpu_send_cmd(uint32_t cmd, uint32_t addr) {
+// To send data to peripheral, make a spi_transaction_t struct and
   // call spi_device_queue_trans/spi_device_get_trans_result or spi_device_transmit
   spi_transaction_t message;
   memset(&message, 0, sizeof(message));
 
   // Serial.println("before flags");
   message.flags = SPI_TRANS_MODE_QIO;
-  message.length = 512;
+  message.length = 4;
   // message.mode = 
-  message.tx_buffer = (void*) &TX_buf;
-  message.rx_buffer = (void*) 0;
-  // message.cmd = 0b00110000;
-  // message.addr = 0x00FF00FF00;
+  message.tx_buffer = (void*) NULL;
+  message.rx_buffer = (void*) NULL;
+  message.cmd = cmd;
+  message.addr = addr;
   message.user = (void*) 1;
-
   
   // SPI Transmission
   if (ESP_OK != spi_device_transmit(guest_name, &message)) {
     Serial.println("Error: Couldn't transmit message");
-    return;
+    return false;
   }
+
+  Serial.printf("Sent command to NB: 0x%x %x\n", cmd, addr);
+  return true;
+}
+
+
+
+
+void loop() {
   
-  // // if (strcmp((char*) RX_buf, "This is a SPI message from the CPU to the NB.")) {
-  Serial.print("SPI NB: ");
-  Serial.printf("%s\n", (char*)RX_buf);
-  // // }
-  // Serial.println((char*)TX_buf);
+  
+  Serial.printf("Sending cmd & addr: %d\n", cpu_send_cmd(0x14, 0x0FF));
+  
+  // memset((TX_buf), 0xF, 4);
+  
+  
+
+  // To send data to peripheral, make a spi_transaction_t struct and
+  // call spi_device_queue_trans/spi_device_get_trans_result or spi_device_transmit
+  
+  
+  
+  
+  // memset(TX_buf, 0xFF, BUF_SIZE);  // Prepares communication buffers
+  // memset(RX_buf, '\0', BUF_SIZE);
+  
+  // memset(RX_buf, '\0', BUF_SIZE);
+  // strcpy((char*) TX_buf, "f f f x x x ");
+  // strcpy((char*) RX_buf, "hey rx    ");
+
+  // spi_transaction_t message;
+  // memset(&message, 0, sizeof(message));
+
+  // // Serial.println("before flags");
+  // message.flags = SPI_TRANS_MODE_DIO | SPI_TRANS_MULTILINE_ADDR;
+  // message.length = 512;
+  // // message.mode = 
+  // message.tx_buffer = (void*) NULL;
+  // message.rx_buffer = (void*) &RX_buf;
+  // // message.cmd = 0b00110000;
+  // // message.addr = 0x00FF00FF00;
+  // message.user = (void*) 1;
+
+  
+  // // SPI Transmission
+  // if (ESP_OK != spi_device_transmit(guest_name, &message)) {
+  //   Serial.println("Error: Couldn't transmit message");
+  //   return;
+  // }
+  // Serial.printf("SPI NB: %s\n", (char*)RX_buf);
+  
 
 
   // Tests SB->NB Communication

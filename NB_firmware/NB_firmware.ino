@@ -533,9 +533,38 @@ void setup() {
 }
 
 
+// QSPI transaction to receive read/write command & address from CPU
+bool cpu_recv_cmd() {
+  uint32_t buf = 0;
+  // memset(buf, 0x0, BUF_SIZE);
+  spi_slave_transaction_t message;        // Transaction struct
+  memset(&message, 0, sizeof(message));
+  message.flags = SPI_TRANS_MODE_QIO;
+  message.length = 4;
+  message.tx_buffer = (void*) NULL;
+  message.rx_buffer = (void*) &buf;
+  message.user = (void*) 1;  
+
+  // Queues message
+  if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
+    Serial.println("Error: couldn't request command");
+    return false;
+  }
+  // Currently, this holds until the SPI transaction completes (polling)
+  // May implement multi-core usage/communication interrupts later
+  if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&message, portMAX_DELAY)) {
+    Serial.println("Error: couldn't receive command");
+    return false;
+  }
+
+  Serial.printf("cmd/addr: 0x%x\n", (uint32_t) buf);
+
+  return true;
+}
+
 
 void loop() {
-  memset(TX_buf, 0xFF, BUF_SIZE);  // Prepares communication buffers
+  memset(TX_buf, '\0', BUF_SIZE);  // Prepares communication buffers
   memset(RX_buf, 0xFF, BUF_SIZE);
   strcpy((char*) TX_buf, "Writing from NB");
   
@@ -547,32 +576,31 @@ void loop() {
     // send_MP3(wavs[idx], 2.5);
   }
 
-  spi_slave_transaction_t message;        // Transaction struct
-  memset(&message, 0, sizeof(message));
-  message.flags = SPI_TRANS_MODE_QIO;
-  message.length = 8*BUF_SIZE;
-  message.tx_buffer = (void*) 0;
-  message.rx_buffer = (void*) &RX_buf;
-  message.user = (void*) msg_idx++;
 
-  // Queues message
-  if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
-    Serial.println("Error: couldn't queue message");
-    // return;
-  }
+  // Gets CPU command and address (no data transfer yet)
+  cpu_recv_cmd();
+
+  // spi_slave_transaction_t message;        // Transaction struct
+  // memset(&message, 0, sizeof(message));
+  // message.flags = SPI_TRANS_MODE_QIO;
+  // message.length = 8*BUF_SIZE;
+  // message.tx_buffer = (void*) &TX_buf;
+  // message.rx_buffer = (void*) 0;
+  // message.user = (void*) 1;
+
+  // // Queues message
+  // if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
+  //   Serial.println("Error: couldn't queue message");
+  //   // return;
+  // }
 
   // delay(1000);
 
-  // Currently, this holds until the SPI transaction completes (polling)
-  // May implement multi-core usage/communication interrupts later
-  if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&message, portMAX_DELAY)) {
-    Serial.println("Error: couldn't receive message");
-    // return;
-  }
+
 
   // Prints received data
-  Serial.print("SPI CPU: ");
-  Serial.printf("%s\n",(char*) RX_buf);
+  // Serial.printf("SPI CPU: %s\n",(char*) RX_buf);
+
   // for (int i = 0; i < BUF_SIZE; i++) {
   //   Serial.printf("%x", (int) RX_buf[i]);
   //   if (RX_buf[i] == '\0') {
