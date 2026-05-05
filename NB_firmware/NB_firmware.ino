@@ -131,7 +131,6 @@ bool init_uart(const uart_port_t port, const uint32_t tx, const uint32_t rx) {
   return true;
 }
 
-
 // Initializes quad SPI communication
 bool init_qspi(spi_host_device_t host, int d0, int d1, int d2, int d3, int clk, int cs) {
   // spi_bus.data0_io_num = d0;
@@ -171,7 +170,6 @@ bool init_qspi(spi_host_device_t host, int d0, int d1, int d2, int d3, int clk, 
   return true;
 }
 
-
 // Initializes single SPI communication
 bool init_spi(spi_host_device_t host, spi_bus_config_t spi_bus, int mosi, int miso, int clk, int cs) {
   spi_bus.mosi_io_num = mosi;
@@ -187,7 +185,6 @@ bool init_spi(spi_host_device_t host, spi_bus_config_t spi_bus, int mosi, int mi
     return true;
   }
 }
-
 
 // // Queues a variable length SPI message to CPU. payload is message to send, length is bytes to send
 // Needs to be adapted to actually be usable...
@@ -279,7 +276,6 @@ void transmit_SPI(uint8_t* payload, uint32_t length) {
   //   }
 }
 
-
 // Reads data from given SD card file to Serial Monitor. Note: prefix filenames with '/'
 void read_SD(const char filepath[]) {
   if (SD.exists(filepath)) {
@@ -295,7 +291,6 @@ void read_SD(const char filepath[]) {
   }
 }
 
-
 // Gets SD card size
 size_t get_SD_size(const char filepath[]) {
   if (SD.exists(filepath)) {
@@ -307,7 +302,6 @@ size_t get_SD_size(const char filepath[]) {
     return 0;
   }
 }
-
 
 // Reads data from given SD card file to data buffer. Note: buffer is passed by reference,
 // and must be instantiated with the required file's size before calling this function
@@ -347,8 +341,7 @@ size_t read_SD2buf(const char filepath[], size_t size, uint8_t* buf) {
   }
 }
 
-
-// Reads an ~~mp3~~ (current WAV) file to a byte steam, then sends it to the Southbridge via UART.
+// Reads an ~~mp3~~ (currently only WAV) file to a byte steam, then sends it to the Southbridge via UART.
 // Buffer will be internally created and is deleted before the end of the function
 // Will return status: 0 is failure, otherwise number of bytes sent.
 // Timeout is delay after failure, in seconds
@@ -388,7 +381,6 @@ size_t send_MP3(const char filepath[], double timeout) {
 
 }
 
-
 // Timeout is number of seconds it'll try (every 2.5 sec)
 bool init_SD(double timeout) {
   SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_SD);
@@ -407,7 +399,6 @@ bool init_SD(double timeout) {
   return true;
 }
 
-
 // Wipes entire flash chip. Be cautious about using this function
 bool FL_clear() {
   if (!flash.eraseChip()) {
@@ -416,7 +407,6 @@ bool FL_clear() {
   }
   return true;
 }
-
 
 void FL_readHex(uint32_t start, uint32_t end) {
   uint8_t test[end - start];
@@ -430,7 +420,6 @@ void FL_readHex(uint32_t start, uint32_t end) {
   }
   Serial.printf("\nEnd read\n");
 }
-
 
 void FL_readChar(uint32_t start, uint32_t end) {
   uint8_t test[end - start] = {0};
@@ -449,7 +438,6 @@ void FL_readChar(uint32_t start, uint32_t end) {
   }
   Serial.printf("\nEnd read\n");
 }
-
 
 void setup() {
   Serial.begin(115200);
@@ -532,15 +520,14 @@ void setup() {
   Serial.printf("Init QSPI: %d\n", init_qspi(cpu_host, VSPI_MOSI, VSPI_MISO, VSPI_D2, VSPI_D3, VSPI_CLK, VSPI_CS));
 }
 
-
 // QSPI transaction to receive read/write command & address from CPU
-bool cpu_recv_cmd() {
-  uint32_t buf = 0;
+uint32_t cpu_recv_cmd(bool debug) {
+  uint32_t buf;
   // memset(buf, 0x0, BUF_SIZE);
   spi_slave_transaction_t message;        // Transaction struct
   memset(&message, 0, sizeof(message));
-  message.flags = SPI_TRANS_MODE_QIO;
-  message.length = 4;
+  message.flags = SPI_TRANS_MODE_DIO;
+  message.length = 32;
   message.tx_buffer = (void*) NULL;
   message.rx_buffer = (void*) &buf;
   message.user = (void*) 1;  
@@ -557,10 +544,43 @@ bool cpu_recv_cmd() {
     return false;
   }
 
-  Serial.printf("cmd/addr: 0x%x\n", (uint32_t) buf);
+  if (debug) {
+    Serial.printf("cmd/addr: 0b");
+    Serial.print(buf, BIN);
+    Serial.println("");
+  }
 
-  return true;
+  return buf;
 }
+
+// Parses 6-bit command, zero-padded into 8-bit int
+uint8_t cpu_read_cmd(uint32_t cmd_addr, bool debug) {
+  uint8_t cmd = (cmd_addr & (1<<7)) | (cmd_addr & (1<<6)) | (cmd_addr & (1<<5)) | (cmd_addr & (1<<4)) | (cmd_addr & (1<<3)) | (cmd_addr & (1<<2));
+  cmd = cmd>>2;
+  if (debug) {
+    Serial.printf("cmd: 0b");
+    for (int i = 5; i >= 0; i--) {
+      Serial.print(bitRead(cmd, i));
+    }
+    Serial.println("");
+  }  
+  return cmd;
+}
+
+// Parses 26-bit address, zero-padded into 32-bit int
+uint32_t cpu_read_addr(uint32_t cmd_addr, bool debug) {
+  uint32_t addr = 0;
+  addr = cmd_addr>>8;
+  if (debug) {
+    Serial.printf("addr: 0b");
+    for (int i = 25; i >= 0; i--) {
+      Serial.print(bitRead(addr, i));
+    }
+    Serial.println("");
+  }
+  return addr;
+}
+
 
 
 void loop() {
@@ -578,7 +598,9 @@ void loop() {
 
 
   // Gets CPU command and address (no data transfer yet)
-  cpu_recv_cmd();
+  uint32_t cmd_addr = cpu_recv_cmd(0);
+  uint8_t cmd = cpu_read_cmd(cmd_addr, 1);
+  uint32_t addr = cpu_read_addr(cmd_addr, 1);
 
   // spi_slave_transaction_t message;        // Transaction struct
   // memset(&message, 0, sizeof(message));

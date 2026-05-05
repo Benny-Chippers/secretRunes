@@ -64,8 +64,8 @@ void setup() {
   memset(&guest_config, 0, sizeof(guest_config));
 
   guest_config = {
-    .command_bits = 8,          // should be 6
-    .address_bits = 24,         // should be 26
+    .command_bits = 6,          // should be 6
+    .address_bits = 26,         // should be 26
     .dummy_bits = 0,
     .mode = 0,
     .clock_speed_hz = 1*10000,
@@ -92,8 +92,8 @@ bool cpu_send_cmd(uint32_t cmd, uint32_t addr) {
   memset(&message, 0, sizeof(message));
 
   // Serial.println("before flags");
-  message.flags = SPI_TRANS_MODE_QIO;
-  message.length = 4;
+  message.flags = SPI_TRANS_MODE_DIO;
+  message.length = 32;
   // message.mode = 
   message.tx_buffer = (void*) NULL;
   message.rx_buffer = (void*) NULL;
@@ -107,7 +107,15 @@ bool cpu_send_cmd(uint32_t cmd, uint32_t addr) {
     return false;
   }
 
-  Serial.printf("Sent command to NB: 0x%x %x\n", cmd, addr);
+  Serial.printf("Sent command to NB:");
+  for (int i = 5; i >= 0; i--) {
+    Serial.print(bitRead(cmd, i));
+  }
+  Serial.printf("\taddr: ");
+  for (int i = 25; i >= 0; i--) {
+    Serial.print(bitRead(addr, i));
+  }
+  Serial.printf("\n");
   return true;
 }
 
@@ -117,7 +125,7 @@ bool cpu_send_cmd(uint32_t cmd, uint32_t addr) {
 void loop() {
   
   
-  Serial.printf("Sending cmd & addr: %d\n", cpu_send_cmd(0x14, 0x0FF));
+  Serial.printf("Sending cmd & addr: %d\n", cpu_send_cmd(0b110100, 0b111100001111000011110000));
   
   // memset((TX_buf), 0xF, 4);
   
