@@ -71,9 +71,9 @@ I2SClass i2s;
 
 
 #define MSG_SIZE 512
-const uint32_t BUF_SIZE = 512/8;  // Bytes in tx/rx buffers
-uint8_t TX_buf[BUF_SIZE];       // Tx buffer
-uint8_t RX_buf[BUF_SIZE];       // Rx buffer
+const uint32_t BUF_SIZE = 64;  // Bytes in tx/rx buffers
+uint8_t TX_buf[BUF_SIZE+1];       // Tx buffer
+uint8_t RX_buf[BUF_SIZE+1];       // Rx buffer
 uint8_t UART_buf[BUF_SIZE];
 
 // For VSPI Configuration
@@ -133,16 +133,18 @@ bool init_uart(const uart_port_t port, const uint32_t tx, const uint32_t rx) {
 
 // Initializes quad SPI communication
 bool init_qspi(spi_host_device_t host, int d0, int d1, int d2, int d3, int clk, int cs) {
+  memset(&spi_bus, 0, sizeof(spi_bus));
   // spi_bus.data0_io_num = d0;
   // spi_bus.data1_io_num = d1;
   // spi_bus.data2_io_num = d2;
   // spi_bus.data3_io_num = d3;
+
   spi_bus.mosi_io_num = VSPI_MOSI;
   spi_bus.miso_io_num = VSPI_MISO;
   spi_bus.quadwp_io_num = VSPI_D2;
   spi_bus.quadhd_io_num = VSPI_D3;
   
-  spi_bus.max_transfer_sz = 32;
+  spi_bus.max_transfer_sz = 4096;
   spi_bus.sclk_io_num = clk;
   
   // Need sample on rising, output on falling (clock idle is high)
@@ -151,8 +153,8 @@ bool init_qspi(spi_host_device_t host, int d0, int d1, int d2, int d3, int clk, 
     .flags = 0,
     .queue_size = 1024,
     .mode = 0,                       
-    .post_setup_cb = 0,
-    .post_trans_cb = 0,
+    .post_setup_cb = NULL,
+    .post_trans_cb = NULL,
   };
   
   // if (ESP_OK != spi_bus_initialize(host, &spi_bus, 0)) {
@@ -519,11 +521,11 @@ void setup() {
 uint32_t cpu_recv_cmd(bool debug) {
   uint32_t buf = 0;
   static uint8_t rx_cmd_buf[4] __attribute__((aligned(4)));
-  // memset(buf, 0x0, BUF_SIZE);
+  memset(rx_cmd_buf, 0, 4*sizeof(uint8_t));
   spi_slave_transaction_t message;        // Transaction struct
   spi_slave_transaction_t* msg_rcv;
   memset(&message, 0, sizeof(message));
-  message.flags = 0;
+  message.flags = SPI_TRANS_MODE_QIO;
   message.length = 32;
   message.tx_buffer = (void*) NULL;
   message.rx_buffer = (void*) rx_cmd_buf;
@@ -541,31 +543,30 @@ uint32_t cpu_recv_cmd(bool debug) {
     Serial.println("Error: couldn't receive command");
     return false;
   }
-  // buf = *(uint32_t*)rx_cmd_buf;
   memcpy(&buf, rx_cmd_buf, 4);
 
   if (debug) {
     Serial.printf("cmd/addr: 0b");
-    for (int i = 31; i >= 0; i--) {
-      Serial.print(bitRead(buf, i));
+    for (int32_t i = 31; i = 0; i--) {
+      Serial.print(1 && (buf & (1<<i)));
     }
     Serial.println("");
   }
-
   return buf;
 }
 
 // Parses 6-bit command, zero-padded into 8-bit int
 uint8_t cpu_read_cmd(uint32_t cmd_addr, bool debug) {
-  if (cmd_addr == 0) {
-    return 0;
-  }
+  Serial.printf("parsing cmd, debug: %d\n", debug);
+  // if (cmd_addr == 0) {    // Invalid command
+  //   return 0;
+  // }
   uint32_t cmd1 = (cmd_addr & (1<<31)) | (cmd_addr & (1<<30)) | (cmd_addr & (1<<29)) | (cmd_addr & (1<<28)) | (cmd_addr & (1<<27)) | (cmd_addr & (1<<26));
   uint8_t cmd = cmd1>>26;
   if (debug) {
     Serial.printf("cmd: 0b");
     for (int i = 5; i >= 0; i--) {
-      Serial.print(bitRead(cmd, i));
+      Serial.print(1 && (cmd & (1<<i)));
     }
     Serial.println("");
   }  
@@ -574,15 +575,20 @@ uint8_t cpu_read_cmd(uint32_t cmd_addr, bool debug) {
 
 // Parses 26-bit address, zero-padded into 32-bit int
 uint32_t cpu_read_addr(uint32_t cmd_addr, bool debug) {
-  if (cmd_addr == 0) {
-    return 0;
+  Serial.printf("parsing addr, debug: %d\n", debug);
+
+  // if (cmd_addr == 0) {        // Invalid command (although addr == 0 is perfectly valid)
+  //   return 0;
+  // }
+  uint32_t addr = cmd_addr;   // Need to remove command bits
+  for (int i = 31; i >= 26; i--) {
+    addr &= ~(1<<i);
   }
-  uint32_t addr = 0;
-  addr = cmd_addr>>8;
+
   if (debug) {
     Serial.printf("addr: 0b");
-    for (int i = 25; i >= 0; i--) {
-      Serial.print(bitRead(addr, i));
+    for (int i = 26; i >= 0; i--) {
+      Serial.print(1 && (addr & (1<<i)));
     }
     Serial.println("");
   }
@@ -590,12 +596,7 @@ uint32_t cpu_read_addr(uint32_t cmd_addr, bool debug) {
 }
 
 
-void loop() {
-  memset(TX_buf, '\0', BUF_SIZE);  // Prepares communication buffers
-  memset(RX_buf, 0x00, BUF_SIZE);
-  strcpy((char*) TX_buf, "Writing from NB");
-  
-    
+void loop() {   
   // Tests NB-SB UART Music streaming
   {
     // int idx = random(0, NUM_WAV-1);
@@ -603,46 +604,45 @@ void loop() {
     // send_MP3(wavs[idx], 2.5);
   }
 
-
-  // Gets CPU command and address (no data transfer yet)
+  // Gets CPU command and address (no actual data transfer yet)
   uint32_t cmd_addr = cpu_recv_cmd(1);
-  uint8_t cmd = cpu_read_cmd(cmd_addr, 0);
-  uint32_t addr = cpu_read_addr(cmd_addr, 0);
-  // delay(1000);
+  uint8_t cmd = cpu_read_cmd(cmd_addr, 1);
+  uint32_t addr = cpu_read_addr(cmd_addr, 1);
+
 
   // Serial.println("Setting up transmission");
-
-
+  memset(TX_buf, '\0', BUF_SIZE+1);  // Prepares communication buffers
+  memset(RX_buf, '\0', BUF_SIZE+1);
+  strncpy((char*) TX_buf, med_msg, BUF_SIZE);
   spi_slave_transaction_t message;        // Transaction struct
   spi_slave_transaction_t* msg_rcv;
   memset(&message, 0, sizeof(message));
-  message.flags = 0;
-  message.length = 8*BUF_SIZE;
+  message.flags = SPI_TRANS_MODE_QIO;
+  message.length = 8*(BUF_SIZE);
   message.tx_buffer = (void*) &TX_buf;
   message.rx_buffer = (void*) 0;
   message.user = (void*) 1;
 
   Serial.printf("Queuing: %s\n", (char*) TX_buf);
 
-
   // Queues message
   if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
     Serial.println("Error: couldn't queue message");
-    // return;
+    return;
   }
-  // delay(500);
 
   // Currently, this holds until the SPI transaction completes (polling)
-  // May implement multi-core usage/communication interrupts later
+  // If I cannot find a way to do SPI interrupts, move the UART transaction to a different core
   if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&msg_rcv, portMAX_DELAY)) {
     Serial.println("Error: couldn't send data");
-    // return;
+    return;
   }
 
 
   // Prints received data
   // Serial.printf("SPI CPU: %s\n",(char*) RX_buf);
 
+  // Prints data in hex
   // for (int i = 0; i < BUF_SIZE; i++) {
   //   Serial.printf("%x", (int) RX_buf[i]);
   //   if (RX_buf[i] == '\0') {
@@ -651,12 +651,9 @@ void loop() {
   // }
   // Serial.println(" ");
 
-
-
   // // Tests UART NB->SB Communication
   // memset(UART_buf, '\0', BUF_SIZE);
   // strcpy((char*) UART_buf, "This is a UART message from the NB to the SB. \n");
-  // delay(1000);
   
   // // Tests UART SB->NB Communication
   // memset(UART_buf, '\0', BUF_SIZE);
@@ -665,5 +662,4 @@ void loop() {
   // Serial.println((char*) UART_buf);
   // uart_flush(UART_PORT);
 
-  // delay(500);
 }
