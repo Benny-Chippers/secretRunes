@@ -142,15 +142,15 @@ bool init_qspi(spi_host_device_t host, int d0, int d1, int d2, int d3, int clk, 
   spi_bus.quadwp_io_num = VSPI_D2;
   spi_bus.quadhd_io_num = VSPI_D3;
   
-
+  spi_bus.max_transfer_sz = 32;
   spi_bus.sclk_io_num = clk;
   
   // Need sample on rising, output on falling (clock idle is high)
   peripheral_config = {
     .spics_io_num = cs,
-    .flags = SPI_DEVICE_HALFDUPLEX,
+    .flags = 0,
     .queue_size = 1024,
-    .mode = 0,                        // Need 3
+    .mode = 0,                       
     .post_setup_cb = 0,
     .post_trans_cb = 0,
   };
@@ -507,14 +507,9 @@ void setup() {
   // int i = 0;
   // ret = flash.writeCharArray(10, str2, 10+strlen(str2), true);
 
-
   // Serial.printf("Sample Text Write: %d\n", ret);
   // FL_readChar(10, 10+strlen(str2));
   // delay(100);
-
-  
-
-
 
   Serial.println("\nNorthbridge initialized");
   Serial.printf("Init QSPI: %d\n", init_qspi(cpu_host, VSPI_MOSI, VSPI_MISO, VSPI_D2, VSPI_D3, VSPI_CLK, VSPI_CS));
@@ -522,14 +517,16 @@ void setup() {
 
 // QSPI transaction to receive read/write command & address from CPU
 uint32_t cpu_recv_cmd(bool debug) {
-  uint32_t buf;
+  uint32_t buf = 0;
+  static uint8_t rx_cmd_buf[4] __attribute__((aligned(4)));
   // memset(buf, 0x0, BUF_SIZE);
   spi_slave_transaction_t message;        // Transaction struct
+  spi_slave_transaction_t* msg_rcv;
   memset(&message, 0, sizeof(message));
-  message.flags = SPI_TRANS_MODE_DIO;
+  message.flags = 0;
   message.length = 32;
   message.tx_buffer = (void*) NULL;
-  message.rx_buffer = (void*) &buf;
+  message.rx_buffer = (void*) rx_cmd_buf;
   message.user = (void*) 1;  
 
   // Queues message
@@ -537,16 +534,21 @@ uint32_t cpu_recv_cmd(bool debug) {
     Serial.println("Error: couldn't request command");
     return false;
   }
+
   // Currently, this holds until the SPI transaction completes (polling)
   // May implement multi-core usage/communication interrupts later
-  if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&message, portMAX_DELAY)) {
+  if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&msg_rcv, portMAX_DELAY)) {
     Serial.println("Error: couldn't receive command");
     return false;
   }
+  // buf = *(uint32_t*)rx_cmd_buf;
+  memcpy(&buf, rx_cmd_buf, 4);
 
   if (debug) {
     Serial.printf("cmd/addr: 0b");
-    Serial.print(buf, BIN);
+    for (int i = 31; i >= 0; i--) {
+      Serial.print(bitRead(buf, i));
+    }
     Serial.println("");
   }
 
@@ -555,8 +557,11 @@ uint32_t cpu_recv_cmd(bool debug) {
 
 // Parses 6-bit command, zero-padded into 8-bit int
 uint8_t cpu_read_cmd(uint32_t cmd_addr, bool debug) {
-  uint8_t cmd = (cmd_addr & (1<<7)) | (cmd_addr & (1<<6)) | (cmd_addr & (1<<5)) | (cmd_addr & (1<<4)) | (cmd_addr & (1<<3)) | (cmd_addr & (1<<2));
-  cmd = cmd>>2;
+  if (cmd_addr == 0) {
+    return 0;
+  }
+  uint32_t cmd1 = (cmd_addr & (1<<31)) | (cmd_addr & (1<<30)) | (cmd_addr & (1<<29)) | (cmd_addr & (1<<28)) | (cmd_addr & (1<<27)) | (cmd_addr & (1<<26));
+  uint8_t cmd = cmd1>>26;
   if (debug) {
     Serial.printf("cmd: 0b");
     for (int i = 5; i >= 0; i--) {
@@ -569,6 +574,9 @@ uint8_t cpu_read_cmd(uint32_t cmd_addr, bool debug) {
 
 // Parses 26-bit address, zero-padded into 32-bit int
 uint32_t cpu_read_addr(uint32_t cmd_addr, bool debug) {
+  if (cmd_addr == 0) {
+    return 0;
+  }
   uint32_t addr = 0;
   addr = cmd_addr>>8;
   if (debug) {
@@ -582,10 +590,9 @@ uint32_t cpu_read_addr(uint32_t cmd_addr, bool debug) {
 }
 
 
-
 void loop() {
   memset(TX_buf, '\0', BUF_SIZE);  // Prepares communication buffers
-  memset(RX_buf, 0xFF, BUF_SIZE);
+  memset(RX_buf, 0x00, BUF_SIZE);
   strcpy((char*) TX_buf, "Writing from NB");
   
     
@@ -598,26 +605,39 @@ void loop() {
 
 
   // Gets CPU command and address (no data transfer yet)
-  uint32_t cmd_addr = cpu_recv_cmd(0);
-  uint8_t cmd = cpu_read_cmd(cmd_addr, 1);
-  uint32_t addr = cpu_read_addr(cmd_addr, 1);
-
-  // spi_slave_transaction_t message;        // Transaction struct
-  // memset(&message, 0, sizeof(message));
-  // message.flags = SPI_TRANS_MODE_QIO;
-  // message.length = 8*BUF_SIZE;
-  // message.tx_buffer = (void*) &TX_buf;
-  // message.rx_buffer = (void*) 0;
-  // message.user = (void*) 1;
-
-  // // Queues message
-  // if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
-  //   Serial.println("Error: couldn't queue message");
-  //   // return;
-  // }
-
+  uint32_t cmd_addr = cpu_recv_cmd(1);
+  uint8_t cmd = cpu_read_cmd(cmd_addr, 0);
+  uint32_t addr = cpu_read_addr(cmd_addr, 0);
   // delay(1000);
 
+  // Serial.println("Setting up transmission");
+
+
+  spi_slave_transaction_t message;        // Transaction struct
+  spi_slave_transaction_t* msg_rcv;
+  memset(&message, 0, sizeof(message));
+  message.flags = 0;
+  message.length = 8*BUF_SIZE;
+  message.tx_buffer = (void*) &TX_buf;
+  message.rx_buffer = (void*) 0;
+  message.user = (void*) 1;
+
+  Serial.printf("Queuing: %s\n", (char*) TX_buf);
+
+
+  // Queues message
+  if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
+    Serial.println("Error: couldn't queue message");
+    // return;
+  }
+  // delay(500);
+
+  // Currently, this holds until the SPI transaction completes (polling)
+  // May implement multi-core usage/communication interrupts later
+  if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&msg_rcv, portMAX_DELAY)) {
+    Serial.println("Error: couldn't send data");
+    // return;
+  }
 
 
   // Prints received data
@@ -645,5 +665,5 @@ void loop() {
   // Serial.println((char*) UART_buf);
   // uart_flush(UART_PORT);
 
-  delay(1000);
+  // delay(500);
 }
