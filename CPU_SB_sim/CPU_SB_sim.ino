@@ -35,6 +35,11 @@ spi_dma_chan_t dma_config = SPI_DMA_DISABLED;
 uart_config_t uart_config;
 QueueHandle_t uart_queue;
 
+bool d_rdy;
+void IRAM_ATTR d_isr() {
+  d_rdy = true;
+}
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
@@ -51,10 +56,10 @@ void setup() {
 
   vspi.mosi_io_num = VSPI_MOSI;           // Bus Configuration
   vspi.miso_io_num = VSPI_MISO;
-  // vspi.quadwp_io_num = -1;
-  // vspi.quadhd_io_num = -1;
-  vspi.quadwp_io_num = VSPI_D2;
-  vspi.quadhd_io_num = VSPI_D3;
+  vspi.quadwp_io_num = -1;
+  vspi.quadhd_io_num = -1;
+  // vspi.quadwp_io_num = VSPI_D2;
+  // vspi.quadhd_io_num = VSPI_D3;
   
   if (ESP_OK != spi_bus_initialize(host_config, &vspi, dma_config)) {
     Serial.println("Error: Couldn't initialize SPI bus");
@@ -64,16 +69,24 @@ void setup() {
   memset(&guest_config, 0, sizeof(guest_config));
 
   guest_config = {
-    .command_bits = 0,          // should be 6
-    .address_bits = 0,         // should be 26
-    .dummy_bits = 0,
+    .command_bits = 8,          // should be 8
+    .address_bits = 28,         // should be 28
+    .dummy_bits = 4,            // should be 4
     .mode = 0,
     .clock_speed_hz = 1*1000,
     .spics_io_num = VSPI_CS,
     .flags = 0,
     // .flags = 0,
     .queue_size = 64,
-  };    // SPI_DEVICE_HALFDUPLEX
+  };
+
+  pinMode(VSPI_D2, OUTPUT);  // CMD_RDY
+  pinMode(VSPI_D3, INPUT); // D_RDY
+
+  d_rdy = false;
+  digitalWrite(VSPI_D2, HIGH);    // High means inactive, falling indicates ready
+  attachInterrupt(VSPI_D3, d_isr, FALLING);
+
   
   if (ESP_OK != spi_bus_add_device(host_config, &guest_config, &guest_name)) {
     Serial.println("Error: Couldn't add peripheral device");
@@ -90,18 +103,18 @@ bool cpu_send_cmd(uint32_t cmd, uint32_t addr) {
   // call spi_device_queue_trans/spi_device_get_trans_result or spi_device_transmit
   spi_transaction_t message;
   memset(&message, 0, sizeof(message));
-  uint32_t cmd_addr = (cmd<<26) | (addr);
+  // uint64_t cmd_addr = (cmd<<26) | (addr);
 
   // Serial.println("before flags");
-  message.flags = SPI_TRANS_USE_TXDATA; //SPI_TRANS_MODE_DIO
-  message.length = 32;
+  message.flags = 0; //SPI_TRANS_USE_TXDATA
+  message.length = 64;
   // message.mode = 
   // message.tx_buffer = (void*) &cmd_addr;
-  memcpy(message.tx_data, &cmd_addr, 4);
+  // memcpy(message.tx_data, &cmd_addr, 4);
 
   message.rx_buffer = (void*) NULL;
-  // message.cmd = cmd;
-  // message.addr = addr;
+  message.cmd = cmd;
+  message.addr = addr;
   message.user = (void*) 1;
   
   // SPI Transmission
@@ -111,9 +124,9 @@ bool cpu_send_cmd(uint32_t cmd, uint32_t addr) {
   }
 
   Serial.printf("Sent command to NB:");
-  for (int i = 31; i >= 0; i--) {
-    Serial.print(bitRead(cmd_addr, i));
-  }
+  // for (int i = 31; i >= 0; i--) {
+  //   Serial.print(bitRead(cmd_addr, i));
+  // }
   // Serial.printf("\taddr: ");
   // for (int i = 25; i >= 0; i--) {
   //   Serial.print(bitRead(addr, i));
@@ -128,8 +141,20 @@ bool cpu_send_cmd(uint32_t cmd, uint32_t addr) {
 void loop() {
   
   
-  Serial.printf("Sending cmd & addr: %d\n", cpu_send_cmd(0b001100, 0b00110011001100110011001100));
+  // Serial.printf("Sending cmd & addr: %d\n", cpu_send_cmd(0xFF, 0x3FFFFFF));
   
+  digitalWrite(VSPI_D2, LOW);
+  delay(100);
+
+  digitalWrite(VSPI_D2, HIGH);
+  delay(2000);
+
+  if (d_rdy) {
+    Serial.println("Getting D_RDY trigger");
+    d_rdy = false;
+  }
+
+
   // memset((TX_buf), 0xF, 4);
   
   
@@ -144,26 +169,28 @@ void loop() {
   // strcpy((char*) TX_buf, "f f f x x x ");
   // strcpy((char*) RX_buf, "hey rx    ");
 
-  spi_transaction_t message;
-  memset(&message, 0, sizeof(message));
+  // spi_transaction_t message;
+  // memset(&message, 0, sizeof(message));
 
-  // Serial.println("before flags");
-  message.flags = 0; //SPI_TRANS_MODE_DIO
-  message.length = 8*BUF_SIZE;
-  message.rxlength = 8*BUF_SIZE;
-  // message.mode = 
-  message.tx_buffer = (void*) NULL;
-  message.rx_buffer = (void*) &RX_buf;
-  // message.cmd = 0b00110000;
-  // message.addr = 0x00FF00FF00;
-  message.user = (void*) 1;
+  // // Serial.println("before flags");
+  // message.flags = 0; //SPI_TRANS_MODE_DIO
+  // message.length = 8*BUF_SIZE;
+  // message.rxlength = 8*BUF_SIZE;
+  // // message.mode = 
+  // message.tx_buffer = (void*) NULL;
+  // message.rx_buffer = (void*) &RX_buf;
+  // // message.cmd = 0b00110000;
+  // // message.addr = 0x00FF00FF00;
+  // message.user = (void*) 1;
   
-  // SPI Receipt
-  if (ESP_OK != spi_device_transmit(guest_name, &message)) {
-    Serial.println("Error: Couldn't transmit message");
-    return;
-  }
-  Serial.printf("SPI NB: %s\n", (char*)RX_buf);
+  // // SPI Receipt
+  // if (ESP_OK != spi_device_transmit(guest_name, &message)) {
+  //   Serial.println("Error: Couldn't transmit message");
+  //   return;
+  // }
+  // Serial.printf("SPI NB: %s\n", (char*)RX_buf);
+
+
 
   // Tests SB->NB Communication
   // memset(UART_buf, '\0', BUF_SIZE);

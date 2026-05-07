@@ -132,24 +132,33 @@ bool init_uart(const uart_port_t port, const uint32_t tx, const uint32_t rx) {
   return true;
 }
 
-// Initializes quad SPI communication
-bool init_qspi(spi_host_device_t host, int d0, int d1, int d2, int d3, int clk, int cs) {
-  memset(&spi_bus, 0, sizeof(spi_bus));
-  // spi_bus.data0_io_num = d0;
-  // spi_bus.data1_io_num = d1;
-  // spi_bus.data2_io_num = d2;
-  // spi_bus.data3_io_num = d3;
 
+bool cmd_rdy;
+void IRAM_ATTR cmd_isr() {
+  cmd_rdy = true;
+}
+
+
+// Initializes single SPI communication. Note: although Quad SPI is desired, the ESP-IDF 'Slave' Driver
+// only supports fullduplex (single) transactions and the Halfduplex driver doesn't support ESP32-wroom-32E
+bool init_spi(spi_host_device_t host, int cs) {
+  memset(&spi_bus, 0, sizeof(spi_bus));
   spi_bus.mosi_io_num = VSPI_MOSI;
   spi_bus.miso_io_num = VSPI_MISO;
+  spi_bus.quadwp_io_num = -1;
+  spi_bus.quadhd_io_num = -1;
 
-  // spi_bus.quadwp_io_num = -1;
-  // spi_bus.quadhd_io_num = -1;
+  pinMode(VSPI_D2, INPUT);  // CMD_RDY
+  pinMode(VSPI_D3, OUTPUT); // D_RDY
 
-  spi_bus.quadwp_io_num = VSPI_D2;
-  spi_bus.quadhd_io_num = VSPI_D3;
+  cmd_rdy = false;
+  digitalWrite(VSPI_D3, HIGH);    // High means inactive, falling indicates ready
+  attachInterrupt(VSPI_D2, cmd_isr, FALLING);
+
+
+
   spi_bus.max_transfer_sz = 4096;
-  spi_bus.sclk_io_num = clk;
+  spi_bus.sclk_io_num = VSPI_CLK;
   spi_bus.flags = 0;
   
   peripheral_config = {
@@ -161,31 +170,12 @@ bool init_qspi(spi_host_device_t host, int d0, int d1, int d2, int d3, int clk, 
     .post_trans_cb = NULL,
   };
   
-
-  Serial.println("Bus initialized");
-
   if (ESP_OK != spi_slave_initialize(host, &spi_bus, &peripheral_config, 0)) {
     Serial.println("Error: Couldn't initialize NB as a QSPI peripheral");
     return false;
   } 
-  Serial.println("Device initialized");
+  Serial.println("SPI peripheral device initialized");
   return true;
-}
-
-// Initializes single SPI communication
-bool init_spi(spi_host_device_t host, spi_bus_config_t spi_bus, int mosi, int miso, int clk, int cs) {
-  spi_bus.mosi_io_num = mosi;
-  spi_bus.miso_io_num = miso;
-  spi_bus.sclk_io_num = clk;
-  spi_bus.quadwp_io_num = -1;
-  spi_bus.quadhd_io_num = -1;
-
-  if (ESP_OK != spi_bus_initialize(host, &spi_bus, SPI_DMA_DISABLED)) {
-    Serial.println("Error: Couldn't initialize SPI bus in peripheral mode");
-    return false;
-  } else {
-    return true;
-  }
 }
 
 // // Queues a variable length SPI message to CPU. payload is message to send, length is bytes to send
@@ -514,21 +504,21 @@ void setup() {
   // delay(100);
 
   Serial.println("\nNorthbridge initialized");
-  Serial.printf("Init QSPI: %d\n", init_qspi(cpu_host, VSPI_MOSI, VSPI_MISO, VSPI_D2, VSPI_D3, VSPI_CLK, VSPI_CS));
+  Serial.printf("Init QSPI: %d\n", init_spi(cpu_host, VSPI_CS));
 }
 
 // QSPI transaction to receive read/write command & address from CPU
-uint32_t cpu_recv_cmd(bool debug) {
-  uint32_t buf = 0;
-  static uint8_t rx_cmd_buf[4] __attribute__((aligned(4)));
-  memset(rx_cmd_buf, 0, 4*sizeof(uint8_t));
+uint64_t cpu_recv_cmd(bool debug) {
+  static uint64_t buf = 0;
+  // static uint8_t rx_cmd_buf[5] __attribute__((aligned(5)));
+  // memset(rx_cmd_buf, 0, 4*sizeof(uint8_t));
   spi_slave_transaction_t message;        // Transaction struct
   spi_slave_transaction_t* msg_rcv;
   memset(&message, 0, sizeof(message));
   message.flags = 0; // SPI_TRANS_MODE_DIO
-  message.length = 32;
+  message.length = 64;  // 8-bit cmd, 4-bit buffer, 28-bit addr
   message.tx_buffer = (void*) NULL;
-  message.rx_buffer = (void*) rx_cmd_buf;
+  message.rx_buffer = (void*) &buf;
   message.user = (void*) 1;  
 
   // Queues message
@@ -543,20 +533,21 @@ uint32_t cpu_recv_cmd(bool debug) {
     Serial.println("Error: couldn't receive command");
     return false;
   }
-  memcpy(&buf, rx_cmd_buf, 4);
+  // memcpy(&buf, rx_cmd_buf, 5);
 
   if (debug) {
     Serial.printf("cmd/addr: 0b");
-    for (int32_t i = 31; i >= 0; i--) {
+    for (int32_t i = 63; i >= 0; i--) {
       Serial.print(1 && (buf & (1<<i)));
+      if (i == 31) Serial.print(" ");
     }
     Serial.println("");
   }
   return buf;
 }
 
-// Parses 6-bit command, zero-padded into 8-bit int
-uint8_t cpu_read_cmd(uint32_t cmd_addr, bool debug) {
+// Parses 8-bit command
+uint8_t cpu_read_cmd(uint64_t cmd_addr, bool debug) {
   Serial.printf("parsing cmd, debug: %d\n", debug);
   // if (cmd_addr == 0) {    // Invalid command
   //   return 0;
@@ -573,21 +564,21 @@ uint8_t cpu_read_cmd(uint32_t cmd_addr, bool debug) {
   return cmd;
 }
 
-// Parses 26-bit address, zero-padded into 32-bit int
+// Parses 28-bit address, zero-padded into 32-bit int
 uint32_t cpu_read_addr(uint32_t cmd_addr, bool debug) {
   Serial.printf("parsing addr, debug: %d\n", debug);
 
   // if (cmd_addr == 0) {        // Invalid command (although addr == 0 is perfectly valid)
   //   return 0;
   // }
-  uint32_t addr = cmd_addr;   // Need to remove command bits
-  for (int i = 31; i >= 26; i--) {
+  uint64_t addr = cmd_addr;   // Need to remove command bits
+  for (int i = 63; i >= 28; i--) {
     addr &= ~(1<<i);
   }
 
   if (debug) {
     Serial.printf("addr: 0b");
-    for (int i = 26; i >= 0; i--) {
+    for (int i = 28; i >= 0; i--) {
       Serial.print(1 && (addr & (1<<i)));
     }
     Serial.println("");
@@ -604,39 +595,49 @@ void loop() {
     // send_MP3(wavs[idx], 2.5);
   }
 
-  // Gets CPU command and address (no actual data transfer yet)
-  uint32_t cmd_addr = cpu_recv_cmd(1);
-  uint8_t cmd = cpu_read_cmd(cmd_addr, 1);
-  uint32_t addr = cpu_read_addr(cmd_addr, 1);
+  if (cmd_rdy) {
+    Serial.println("Getting CMD_RDY trigger");
+    cmd_rdy = false;
 
+    digitalWrite(VSPI_D3, LOW);
+    delay(100);
+    digitalWrite(VSPI_D3, HIGH);
 
-  // Serial.println("Setting up transmission");
-  memset(TX_buf, '\0', BUF_SIZE+1);  // Prepares communication buffers
-  memset(RX_buf, '\0', BUF_SIZE+1);
-  strncpy((char*) TX_buf, med_msg, BUF_SIZE);
-  spi_slave_transaction_t message;        // Transaction struct
-  spi_slave_transaction_t* msg_rcv;
-  memset(&message, 0, sizeof(message));
-  message.flags = 0; //SPI_TRANS_MODE_DIO
-  message.length = 8*(BUF_SIZE);
-  message.tx_buffer = (void*) &TX_buf;
-  message.rx_buffer = (void*) 0;
-  message.user = (void*) 1;
-
-  Serial.printf("Queuing: %s\n", (char*) TX_buf);
-
-  // Queues message
-  if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
-    Serial.println("Error: couldn't queue message");
-    return;
   }
 
-  // Currently, this holds until the SPI transaction completes (polling)
-  // If I cannot find a way to do SPI interrupts, move the UART transaction to a different core
-  if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&msg_rcv, portMAX_DELAY)) {
-    Serial.println("Error: couldn't send data");
-    return;
-  }
+  // // Gets CPU command and address (no actual data transfer yet)
+  // uint32_t cmd_addr = cpu_recv_cmd(1);
+  // uint8_t cmd = cpu_read_cmd(cmd_addr, 1);
+  // uint32_t addr = cpu_read_addr(cmd_addr, 1);
+
+
+  // // Serial.println("Setting up transmission");
+  // memset(TX_buf, '\0', BUF_SIZE+1);  // Prepares communication buffers
+  // memset(RX_buf, '\0', BUF_SIZE+1);
+  // strncpy((char*) TX_buf, med_msg, BUF_SIZE);
+  // spi_slave_transaction_t message;        // Transaction struct
+  // spi_slave_transaction_t* msg_rcv;
+  // memset(&message, 0, sizeof(message));
+  // message.flags = 0;
+  // message.length = 8*(BUF_SIZE);
+  // message.tx_buffer = (void*) &TX_buf;
+  // message.rx_buffer = (void*) 0;
+  // message.user = (void*) 1;
+
+  // Serial.printf("Queuing: %s\n", (char*) TX_buf);
+
+  // // Queues message
+  // if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
+  //   Serial.println("Error: couldn't queue message");
+  //   return;
+  // }
+
+  // // Currently, this holds until the SPI transaction completes (polling)
+  // // If I cannot find a way to do SPI interrupts, move the UART transaction to a different core
+  // if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&msg_rcv, portMAX_DELAY)) {
+  //   Serial.println("Error: couldn't send data");
+  //   return;
+  // }
 
 
   // Prints received data
