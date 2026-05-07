@@ -40,19 +40,21 @@ void setup() {
   Serial.begin(115200);
   memset(&vspi, 0, sizeof(vspi));
   vspi.sclk_io_num = VSPI_CLK;
-  vspi.data0_io_num = VSPI_MOSI;
-  vspi.data1_io_num = VSPI_MISO;
-  vspi.data2_io_num = VSPI_D2;
-  vspi.data3_io_num = VSPI_D3;
+  // vspi.data0_io_num = VSPI_MOSI;
+  // vspi.data1_io_num = VSPI_MISO;
+  // vspi.data2_io_num = VSPI_D2;
+  // vspi.data3_io_num = VSPI_D3;
 
 
   vspi.flags = 0;
   vspi.max_transfer_sz = 4096;
 
-  // vspi.mosi_io_num = VSPI_MOSI;           // Bus Configuration
-  // vspi.miso_io_num = VSPI_MISO;
-  // vspi.quadwp_io_num = VSPI_D2;
-  // vspi.quadhd_io_num = VSPI_D3;
+  vspi.mosi_io_num = VSPI_MOSI;           // Bus Configuration
+  vspi.miso_io_num = VSPI_MISO;
+  // vspi.quadwp_io_num = -1;
+  // vspi.quadhd_io_num = -1;
+  vspi.quadwp_io_num = VSPI_D2;
+  vspi.quadhd_io_num = VSPI_D3;
   
   if (ESP_OK != spi_bus_initialize(host_config, &vspi, dma_config)) {
     Serial.println("Error: Couldn't initialize SPI bus");
@@ -68,10 +70,10 @@ void setup() {
     .mode = 0,
     .clock_speed_hz = 1*1000,
     .spics_io_num = VSPI_CS,
-    .flags = SPI_DEVICE_HALFDUPLEX,
+    .flags = 0,
     // .flags = 0,
-    .queue_size = 4096,
-  };
+    .queue_size = 64,
+  };    // SPI_DEVICE_HALFDUPLEX
   
   if (ESP_OK != spi_bus_add_device(host_config, &guest_config, &guest_name)) {
     Serial.println("Error: Couldn't add peripheral device");
@@ -91,10 +93,12 @@ bool cpu_send_cmd(uint32_t cmd, uint32_t addr) {
   uint32_t cmd_addr = (cmd<<26) | (addr);
 
   // Serial.println("before flags");
-  message.flags = SPI_TRANS_MODE_QIO;
+  message.flags = SPI_TRANS_USE_TXDATA; //SPI_TRANS_MODE_DIO
   message.length = 32;
   // message.mode = 
-  message.tx_buffer = (void*) &cmd_addr;
+  // message.tx_buffer = (void*) &cmd_addr;
+  memcpy(message.tx_data, &cmd_addr, 4);
+
   message.rx_buffer = (void*) NULL;
   // message.cmd = cmd;
   // message.addr = addr;
@@ -129,12 +133,12 @@ void loop() {
   // memset((TX_buf), 0xF, 4);
   
   
+  memset(RX_buf, '\0', BUF_SIZE+1);
   delay(500);
   // To send data to peripheral, make a spi_transaction_t struct and
   // call spi_device_queue_trans/spi_device_get_trans_result or spi_device_transmit
   
   // memset(TX_buf, 0xFF, BUF_SIZE);  // Prepares communication buffers
-  memset(RX_buf, '\0', BUF_SIZE+1);
   
   // memset(RX_buf, '\0', BUF_SIZE);
   // strcpy((char*) TX_buf, "f f f x x x ");
@@ -144,7 +148,7 @@ void loop() {
   memset(&message, 0, sizeof(message));
 
   // Serial.println("before flags");
-  message.flags = SPI_TRANS_MODE_QIO;
+  message.flags = 0; //SPI_TRANS_MODE_DIO
   message.length = 8*BUF_SIZE;
   message.rxlength = 8*BUF_SIZE;
   // message.mode = 

@@ -18,7 +18,8 @@
 #include <Arduino.h>
 #include <string.h>
 // #include <driver/spi_master.h>
-#include <driver/spi_slave.h>
+#include <driver/spi_slave.h>       // Doesn't play nicely with Quad SPI
+
 #include <driver/uart.h>
 #include <esp_random.h>
 #include <sdmmc_cmd.h>
@@ -141,30 +142,29 @@ bool init_qspi(spi_host_device_t host, int d0, int d1, int d2, int d3, int clk, 
 
   spi_bus.mosi_io_num = VSPI_MOSI;
   spi_bus.miso_io_num = VSPI_MISO;
+
+  // spi_bus.quadwp_io_num = -1;
+  // spi_bus.quadhd_io_num = -1;
+
   spi_bus.quadwp_io_num = VSPI_D2;
   spi_bus.quadhd_io_num = VSPI_D3;
-  
   spi_bus.max_transfer_sz = 4096;
   spi_bus.sclk_io_num = clk;
+  spi_bus.flags = 0;
   
-  // Need sample on rising, output on falling (clock idle is high)
   peripheral_config = {
     .spics_io_num = cs,
     .flags = 0,
-    .queue_size = 1024,
+    .queue_size = 64,
     .mode = 0,                       
     .post_setup_cb = NULL,
     .post_trans_cb = NULL,
   };
   
-  // if (ESP_OK != spi_bus_initialize(host, &spi_bus, 0)) {
-  //   Serial.println("Error: Couldn't initialize NB as a QSPI peripheral");
-  //   return false;
-  // }
 
   Serial.println("Bus initialized");
 
-  if (ESP_OK != spi_slave_initialize(host, &spi_bus, &peripheral_config, SPI_DMA_DISABLED)) {
+  if (ESP_OK != spi_slave_initialize(host, &spi_bus, &peripheral_config, 0)) {
     Serial.println("Error: Couldn't initialize NB as a QSPI peripheral");
     return false;
   } 
@@ -525,7 +525,7 @@ uint32_t cpu_recv_cmd(bool debug) {
   spi_slave_transaction_t message;        // Transaction struct
   spi_slave_transaction_t* msg_rcv;
   memset(&message, 0, sizeof(message));
-  message.flags = SPI_TRANS_MODE_QIO;
+  message.flags = 0; // SPI_TRANS_MODE_DIO
   message.length = 32;
   message.tx_buffer = (void*) NULL;
   message.rx_buffer = (void*) rx_cmd_buf;
@@ -547,7 +547,7 @@ uint32_t cpu_recv_cmd(bool debug) {
 
   if (debug) {
     Serial.printf("cmd/addr: 0b");
-    for (int32_t i = 31; i = 0; i--) {
+    for (int32_t i = 31; i >= 0; i--) {
       Serial.print(1 && (buf & (1<<i)));
     }
     Serial.println("");
@@ -617,7 +617,7 @@ void loop() {
   spi_slave_transaction_t message;        // Transaction struct
   spi_slave_transaction_t* msg_rcv;
   memset(&message, 0, sizeof(message));
-  message.flags = SPI_TRANS_MODE_QIO;
+  message.flags = 0; //SPI_TRANS_MODE_DIO
   message.length = 8*(BUF_SIZE);
   message.tx_buffer = (void*) &TX_buf;
   message.rx_buffer = (void*) 0;
