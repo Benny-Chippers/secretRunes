@@ -77,7 +77,7 @@ void setup() {
     .spics_io_num = VSPI_CS,
     .flags = 0,
     // .flags = 0,
-    .queue_size = 4,
+    .queue_size = 3,
   };
 
   pinMode(VSPI_D2, OUTPUT);  // CMD_RDY

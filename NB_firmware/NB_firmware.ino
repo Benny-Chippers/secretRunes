@@ -35,18 +35,18 @@
 
 
 // Pins for Northbridge-CPU SPI
-#define VSPI_CLK 18     // big board: 5
-#define VSPI_CS 5     // big board: 18
-#define VSPI_MOSI 23   // (D0) old NB/MB: 23, big board: 17
+#define VSPI_CLK 18     // big board: 18
+#define VSPI_CS 5     // big board: 5
+#define VSPI_MOSI 17   // (D0) old NB/MB: 23, big board: 17
 #define VSPI_MISO 19   // (D1) big board: 19
 #define VSPI_D2 21     // big board: 21
-#define VSPI_D3 22     // old NB/MB: 22, big board: 16
+#define VSPI_D3 16     // old NB/MB: 22, big board: 16
 
 // Pins for Northbridge-Southbridge UART
 #define UART_TX 33    // old NB/MB: 16, big board: 33
 #define UART_RX 32    // old NB/MB: 17, big board: 32
 #define UART_PORT UART_NUM_2
-#define UART_BAUD 57600      // Baud Rate (symbols/sec) for NB-SB UART
+#define UART_BAUD 74880      // Baud Rate (symbols/sec) for NB-SB UART
 SoftwareSerial SBuart(UART_RX, UART_TX);
 #define TRAN_SIZE 32768.0
 
@@ -164,7 +164,7 @@ bool init_spi(spi_host_device_t host, int cs) {
   peripheral_config = {
     .spics_io_num = cs,
     .flags = 0,
-    .queue_size = 4,
+    .queue_size = 3,
     .mode = 0,                       
     .post_setup_cb = NULL,
     .post_trans_cb = NULL,
@@ -295,6 +295,43 @@ size_t get_SD_size(const char filepath[]) {
   }
 }
 
+// // Reads data from given SD card file to data buffer. Note: buffer is passed by reference,
+// // and must be instantiated with the required file's size before calling this function
+// // Note: UART bottlenecked old setup from being able to use UART for continuous music transmission
+// size_t read_SD2buf(const char filepath[], size_t size, uint8_t* buf) {
+//   if (SD.exists(filepath)) {
+//     File f = SD.open(filepath);
+
+//     size_t sent = 0;
+//     while(f.available()) {
+//       for(size_t i = 0; i < TRAN_SIZE; i++) {
+//         if (f.available()) {
+//           buf[i] = f.read();
+//           // i2s.write(buf[i]);
+//           SBuart.print((char)buf[i]);
+//           Serial.printf("%x", buf[i]);
+
+//           sent++;
+//         } else {
+//           buf[i] = 0;
+//         }
+//       }
+//       //Sends buffer over UART...
+//       // Serial.println((char*)   buf);
+//       // for (int i = 0; i < TRAN_SIZE; i++) {
+//       //   Serial.print((char)buf[i]); // for debugging
+//       //   Serial.print(",");
+//       // }
+//       // Serial.println("");
+//     }
+//     f.close();
+//     Serial.println("exiting read_SD2buf");
+//     return sent;
+//   } else {
+//     Serial.printf("Error: %s doesn't exist\n", filepath);
+//     return 0;
+//   }
+// }
 // Reads data from given SD card file to data buffer. Note: buffer is passed by reference,
 // and must be instantiated with the required file's size before calling this function
 // Note: UART bottlenecked old setup from being able to use UART for continuous music transmission
@@ -307,9 +344,13 @@ size_t read_SD2buf(const char filepath[], size_t size, uint8_t* buf) {
       for(size_t i = 0; i < TRAN_SIZE; i++) {
         if (f.available()) {
           buf[i] = f.read();
+          i++;
+          buf[i] = f.read();
+          f.read();
+          f.read();
           // i2s.write(buf[i]);
           SBuart.print((char)buf[i]);
-          Serial.printf("%x", buf[i]);
+          // Serial.printf("%x", buf[i]);
 
           sent++;
         } else {
@@ -333,11 +374,54 @@ size_t read_SD2buf(const char filepath[], size_t size, uint8_t* buf) {
   }
 }
 
-// Reads an ~~mp3~~ (currently only WAV) file to a byte steam, then sends it to the Southbridge via UART.
+
+
+// // Reads an ~~mp3~~ (currently only WAV) file to a byte steam, then sends it to the Southbridge via UART.
+// // Buffer will be internally created and is deleted before the end of the function
+// // Will return status: 0 is failure, otherwise number of bytes sent.
+// // Timeout is delay after failure, in seconds
+// size_t send_MP3(const char filepath[], double timeout) {
+//     Serial.println("entering send_MP3");
+//   if (SD.exists(filepath)) {
+//     size_t size = get_SD_size(filepath);                      // Opens file
+//     size_t sent = 0;
+//     Serial.printf("File %s is: ", filepath);
+//     Serial.print(size);
+//     Serial.print(" bytes. Need ");
+//     Serial.print(size / TRAN_SIZE);
+//     Serial.println(" transmissions");
+
+//     while (sent < size) { 
+//       uint8_t* buf = NULL;                              // Allocates buffer
+//       buf = (uint8_t*)heap_caps_malloc(TRAN_SIZE+1, MALLOC_CAP_8BIT);
+//       if (NULL == buf) {
+//         Serial.println("failed to make buffer");
+//         return 0;
+//       }
+//       memset(buf, '\0', TRAN_SIZE+1);
+
+//       // Serial.println("made buffer");
+//       sent += read_SD2buf(filepath, size, (uint8_t*) buf); // Reads file to buffer
+//       Serial.println("");
+//       heap_caps_free((void*) buf);
+//     }
+    
+//     Serial.println("sent mp3");
+
+//     return size;
+//   } else {
+//     Serial.printf("Error: %s not found\n", filepath);
+//     delay(timeout*1000);
+//     return 0;
+//   }
+
+// }
+
+// Reads an mp3 file to a byte steam, then sends it to the Southbridge via UART.
 // Buffer will be internally created and is deleted before the end of the function
-// Will return status: 0 is failure, otherwise number of bytes sent.
-// Timeout is delay after failure, in seconds
-size_t send_MP3(const char filepath[], double timeout) {
+// Will return status: 0 is failure, otherwise number of bytes sent 
+size_t send_MP3(const char filepath[]) {
+  Serial.println("sodjfoj");
   if (SD.exists(filepath)) {
     size_t size = get_SD_size(filepath);                      // Opens file
     size_t sent = 0;
@@ -367,17 +451,18 @@ size_t send_MP3(const char filepath[], double timeout) {
     return size;
   } else {
     Serial.printf("Error: %s not found\n", filepath);
-    delay(timeout*1000);
     return 0;
   }
 
 }
 
+SPIClass hspi(HSPI);
+
 // Timeout is number of seconds it'll try (every 2.5 sec)
 bool init_SD(double timeout) {
-  SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_SD);
+  hspi.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_SD);
   double elapsed = 0;
-  while (!SD.begin(HSPI_CS_SD) & (elapsed < timeout)) {                         // Tries to connect for 7.5 seconds
+  while (!SD.begin(HSPI_CS_SD, hspi) & (elapsed < timeout)) {                         // Tries to connect for 7.5 seconds
     Serial.println("Error: SD Card mount failed");
     delay(2500);
     elapsed += 2.5;
@@ -431,6 +516,23 @@ void FL_readChar(uint32_t start, uint32_t end) {
   Serial.printf("\nEnd read\n");
 }
 
+
+
+
+TaskHandle_t Task0;
+// void Tx_Music() {
+//   // while (1) {
+//     // Tests NB-SB UART Music streaming
+//     Serial.println("Sending song");
+//     int idx = random(0, NUM_WAV-1);
+//     delay(1);
+//     send_MP3(wavs[idx], 2.5);
+// // 
+//   // }
+// }
+
+
+
 void setup() {
   Serial.begin(115200);
   randomSeed(time(NULL));
@@ -468,9 +570,9 @@ void setup() {
   // Serial.printf("norm: %x\n", (int) norm);
   // free(norm);
 
-  // // SD initialization
-  // double timeout = 0;       // Time to wait on SD card
-  // Serial.printf("\nSD Init: %d\n", init_SD(timeout));
+  // SD initialization
+  double timeout = 10;       // Time to wait on SD card
+  Serial.printf("\nSD Init: %d\n", init_SD(timeout));
 
   // void* ps = NULL;
   // if (!psramInit()) {
@@ -502,6 +604,8 @@ void setup() {
   // Serial.printf("Sample Text Write: %d\n", ret);
   // FL_readChar(10, 10+strlen(str2));
   // delay(100);
+
+  // xTaskCreatePinnedToCore((TaskFunction_t) Tx_Music, "TxMusic", 10000, NULL, 2, &Task0, 0);
 
   Serial.println("\nNorthbridge initialized");
   Serial.printf("Init QSPI: %d\n", init_spi(cpu_host, VSPI_CS));
@@ -542,8 +646,6 @@ struct cmd_addr cpu_recv_cmd(bool debug) {
     return err;
   }
 
-  // delay(100);
-
   memset(&message, 0, sizeof(message));
   message.flags = 0; // SPI_TRANS_MODE_DIO
   message.length = 32;  // 8-bit cmd, 4-bit buffer, 28-bit addr
@@ -574,15 +676,71 @@ struct cmd_addr cpu_recv_cmd(bool debug) {
   return ca;
 }
 
+// Reads/interprets command to 
+uint32_t parse_cmd(uint8_t cmd, uint32_t addr, bool debug) {
+  // Gets destination (0 is PSRAM, 1 is Flash, 2 is SD Card, 3 is Southbridge)
+  uint8_t dest = (cmd & (1<<7)) | (cmd & (1<<6));
+  dest = dest>>6;
 
-void loop() {   
-  // Tests NB-SB UART Music streaming
-  {
-    // int idx = random(0, NUM_WAV-1);
-    // delay(1);
-    // send_MP3(wavs[idx], 2.5);
+  // Gets request size (0 is whole word, 1 is first half, 2 is second half, 3-6 are bytes 1-4)
+  uint8_t size = (cmd & (1<<5)) | (cmd & (1<<4)) | (cmd & (1<<3)) | (cmd & (1<<2));
+  size = size >>2;
+
+  // Gets if it's a read or write request ()
+  bool write = (cmd & 1<<1) || (cmd & 1);
+
+  switch (dest) {
+    case 0:   // PSRAM
+      Serial.println("Oops, we still need to implement PSRAM access");
+
+
+      break;
+
+    case 1:   // Flash
+      if (write) {  // Write to Flash
+        // ret = flash.write();      
+
+      } else {      // Read from Flash
+        
+        // ret = flash.readByteArray(addr, (uint8_t*) &test, (e), true);
+        if (!ret) {
+          Serial.println("Error: Couldn't read flash");
+        return 0xFFFFFFFF;    // Returning error
+        }
+
+      }
+      break;
+
+    case 2:   // SD Card
+      Serial.println("Oops, we still need to implement SD card access from the CPU");
+      break;
+    case 3:  // Southbridge
+      Serial.println("Oops, we still need to implement SB access from the CPU");
+      break;
+    default:
+      Serial.println("Error: Couldn't parse command");
+      break;
+  }  
+
+
+  if (debug) {
+    Serial.println("CPU asked for:");
+    Serial.printf("dest: ");
+    Serial.print(dest, BIN);
+    Serial.printf("\tsize: ");
+    Serial.print(size, BIN);
+    Serial.printf("\tdest: ");
+    Serial.print(write, BIN);
+    // Serial.printf("\tReturning: %x" );
+    Serial.println("");
   }
 
+
+  return 0;
+}
+
+
+void loop() {   
   // Needs one dedicated core to service CPU SPI requests
   if (cmd_rdy) {
     // Serial.println("Getting CMD_RDY trigger");
@@ -591,9 +749,10 @@ void loop() {
     struct cmd_addr ca = cpu_recv_cmd(false);
 
     Serial.printf("cmd: 0x%x\taddr: 0x%x\t", ca.cmd, ca.addr);
-
     // memset(RX_buf, '\0', BUF_SIZE+1);
-    uint32_t buf = 0x12345678;        // Replace with actual read/write
+    // uint32_t buf = 0x12345678;        // Replace with actual read/write
+
+    uint32_t buf = parse_cmd(ca.cmd, ca.addr, true);
 
     spi_slave_transaction_t message;        // Transaction struct
     spi_slave_transaction_t* msg_rcv;
@@ -627,35 +786,6 @@ void loop() {
     
     cmd_rdy = false;
   }
-
-
-
-
-  // // Serial.println("Setting up transmission");
-  // memset(TX_buf, '\0', BUF_SIZE+1);  // Prepares communication buffers
-
-
-  // Prints received data
-  // Serial.printf("SPI CPU: %s\n",(char*) RX_buf);
-
-  // Prints data in hex
-  // for (int i = 0; i < BUF_SIZE; i++) {
-  //   Serial.printf("%x", (int) RX_buf[i]);
-  //   if (RX_buf[i] == '\0') {
-  //     break;
-  //   }
-  // }
-  // Serial.println(" ");
-
-  // // Tests UART NB->SB Communication
-  // memset(UART_buf, '\0', BUF_SIZE);
-  // strcpy((char*) UART_buf, "This is a UART message from the NB to the SB. \n");
-  
-  // // Tests UART SB->NB Communication
-  // memset(UART_buf, '\0', BUF_SIZE);
-  // uart_read_bytes(UART_PORT, UART_buf, BUF_SIZE - 1, 1000);  
-  // Serial.print("UART SB: ");
-  // Serial.println((char*) UART_buf);
-  // uart_flush(UART_PORT);
-
+  send_MP3("/meglo.wav");
+  Serial.println("\n\ndone");
 }
