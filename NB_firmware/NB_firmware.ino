@@ -35,8 +35,8 @@
 
 
 // Pins for Northbridge-CPU SPI
-#define VSPI_CLK 18     // big board: 18
-#define VSPI_CS 5     // big board: 5
+#define VSPI_CLK 5     // big board: 18
+#define VSPI_CS 18     // big board: 5
 #define VSPI_MOSI 17   // (D0) old NB/MB: 23, big board: 17
 #define VSPI_MISO 19   // (D1) big board: 19
 #define VSPI_D2 21     // big board: 21
@@ -104,6 +104,8 @@ uint64_t FL_MAX;
 SPIFlash psram(HSPI_CS_PS);
 uint64_t PS_MAX;
 uint32_t ret;
+bool fencepost = true;
+spi_slave_transaction_t message;        // Transaction struct
 
 
 // Initializes UART using given pins
@@ -133,7 +135,7 @@ bool init_uart(const uart_port_t port, const uint32_t tx, const uint32_t rx) {
 }
 
 
-bool cmd_rdy;
+bool cmd_rdy = false;
 void IRAM_ATTR cmd_isr() {
   cmd_rdy = true;
 }
@@ -344,10 +346,10 @@ size_t read_SD2buf(const char filepath[], size_t size, uint8_t* buf) {
       for(size_t i = 0; i < TRAN_SIZE; i++) {
         if (f.available()) {
           buf[i] = f.read();
-          i++;
-          buf[i] = f.read();
-          f.read();
-          f.read();
+          // i++;
+          // buf[i] = f.read();
+          // f.read();
+          // f.read();
           // i2s.write(buf[i]);
           SBuart.print((char)buf[i]);
           // Serial.printf("%x", buf[i]);
@@ -537,9 +539,6 @@ void setup() {
   Serial.begin(115200);
   randomSeed(time(NULL));
   delay(1);
-
-  strcpy((char*) TX_buf, "This is a SPI message from the NB to the CPU.");
-
   memset(TX_buf, '\0', BUF_SIZE);  // Prepares communication buffers
   memset(RX_buf, '\0', BUF_SIZE);
   SBuart.begin(UART_BAUD);
@@ -609,183 +608,159 @@ void setup() {
 
   Serial.println("\nNorthbridge initialized");
   Serial.printf("Init QSPI: %d\n", init_spi(cpu_host, VSPI_CS));
+
+  Serial.println("endering loop");
 }
 
-
-struct cmd_addr{
-  uint8_t cmd;
-  uint32_t addr;
+struct cmd_data{
+  uint8_t dest;
+  uint8_t size;
+  bool write;
 };
 
-// QSPI transaction to receive read/write command & address from CPU
-struct cmd_addr cpu_recv_cmd(bool debug) {
-  struct cmd_addr ca = {0};
-  struct cmd_addr err = {0};
-  uint32_t buf[2] = {0};
-  // static uint8_t rx_cmd_buf[5] __attribute__((aligned(5)));
-  // memset(rx_cmd_buf, 0, 4*sizeof(uint8_t));
-  spi_slave_transaction_t message;        // Transaction struct
-  spi_slave_transaction_t* msg_rcv;
-  memset(&message, 0, sizeof(message));
-  message.flags = 0; // SPI_TRANS_MODE_DIO
-  message.length = 32;  // 8-bit cmd, 4-bit buffer, 28-bit addr
-  message.tx_buffer = (void*) NULL;
-  message.rx_buffer = (void*) &buf[0];
-  message.user = (void*) 1;  
-
-  // Queues message
-  if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
-    Serial.println("Error: couldn't request command");
-    return err;
-  }
-
-  // Currently, this holds until the SPI transaction completes (polling)
-  // May implement multi-core usage/communication interrupts later
-  if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&msg_rcv, portMAX_DELAY)) {
-    Serial.println("Error: couldn't receive command");
-    return err;
-  }
-
-  memset(&message, 0, sizeof(message));
-  message.flags = 0; // SPI_TRANS_MODE_DIO
-  message.length = 32;  // 8-bit cmd, 4-bit buffer, 28-bit addr
-  message.tx_buffer = (void*) NULL;
-  message.rx_buffer = (void*) &buf[1];
-  message.user = (void*) 1;  
-
-
-  // Queues message
-  if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
-    Serial.println("Error: couldn't request command");
-    return err;
-  }
-
-  // Currently, this holds until the SPI transaction completes (polling)
-  // May implement multi-core usage/communication interrupts later
-  if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&msg_rcv, portMAX_DELAY)) {
-    Serial.println("Error: couldn't receive command");
-    return err;
-  }
-
-  if (debug) {
-    Serial.printf("cmd: 0x%x\n", buf[0]);
-    Serial.printf("addr: 0x%x\n", buf[1]);
-  }
-  ca.cmd = buf[0];
-  ca.addr = buf[1];
-  return ca;
-}
-
 // Reads/interprets command to 
-uint32_t parse_cmd(uint8_t cmd, uint32_t addr, bool debug) {
+struct cmd_data parse_cmd(uint8_t cmd, bool debug) {
+
+  struct cmd_data ret;
   // Gets destination (0 is PSRAM, 1 is Flash, 2 is SD Card, 3 is Southbridge)
-  uint8_t dest = (cmd & (1<<7)) | (cmd & (1<<6));
-  dest = dest>>6;
-
+  uint8_t dest = (cmd & 0b11000000);
+  dest = dest>> 6;
   // Gets request size (0 is whole word, 1 is first half, 2 is second half, 3-6 are bytes 1-4)
-  uint8_t size = (cmd & (1<<5)) | (cmd & (1<<4)) | (cmd & (1<<3)) | (cmd & (1<<2));
-  size = size >>2;
-
+  uint8_t size = (cmd & 0b00111100);
+  size = size >> 2;
   // Gets if it's a read or write request ()
-  bool write = (cmd & 1<<1) || (cmd & 1);
-
-  switch (dest) {
-    case 0:   // PSRAM
-      Serial.println("Oops, we still need to implement PSRAM access");
-
-
-      break;
-
-    case 1:   // Flash
-      if (write) {  // Write to Flash
-        // ret = flash.write();      
-
-      } else {      // Read from Flash
-        
-        // ret = flash.readByteArray(addr, (uint8_t*) &test, (e), true);
-        if (!ret) {
-          Serial.println("Error: Couldn't read flash");
-        return 0xFFFFFFFF;    // Returning error
-        }
-
-      }
-      break;
-
-    case 2:   // SD Card
-      Serial.println("Oops, we still need to implement SD card access from the CPU");
-      break;
-    case 3:  // Southbridge
-      Serial.println("Oops, we still need to implement SB access from the CPU");
-      break;
-    default:
-      Serial.println("Error: Couldn't parse command");
-      break;
-  }  
-
-
-  if (debug) {
-    Serial.println("CPU asked for:");
-    Serial.printf("dest: ");
-    Serial.print(dest, BIN);
-    Serial.printf("\tsize: ");
-    Serial.print(size, BIN);
-    Serial.printf("\tdest: ");
-    Serial.print(write, BIN);
-    // Serial.printf("\tReturning: %x" );
-    Serial.println("");
-  }
-
-
-  return 0;
+  bool write = (cmd & 0b00000011);
+  ret.dest = dest;
+  ret.size = size;
+  ret.write = write;
+  return ret;
 }
 
+
+void create_input_queue(uint8_t* buf, int size) {
+  memset(&message, 0, sizeof(message));
+  message.flags = 0; // SPI_TRANS_MODE_DIO
+  message.length = size;  // 8-bit cmd, 4-bit buffer, 28-bit addr
+  message.tx_buffer = (void*) NULL;
+  message.rx_buffer = (void*) buf;
+  message.user = (void*) 1;  
+
+  // Queues message
+  if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
+    Serial.println("Error: couldn't request command");
+  }
+}
+
+void create_output_queue(uint8_t* buf, int size) {
+  memset(&message, 0, sizeof(message));
+  message.flags = 0; // SPI_TRANS_MODE_DIO
+  message.length = size;  // 8-bit cmd, 4-bit buffer, 28-bit addr
+  message.tx_buffer = (void*) buf;
+  message.rx_buffer = (void*) NULL;
+  message.user = (void*) 1;  
+
+  // Queues message
+  if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
+    Serial.println("Error: couldn't request command");
+  }
+}
+
+void wait_for_queue_resilts() {
+  spi_slave_transaction_t* msg_rcv;        // Transaction struct
+    if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&msg_rcv, portMAX_DELAY)) {
+    Serial.println("Error: couldn't receive command");
+  }
+}
+
+void sned_ready() {
+  digitalWrite(VSPI_D3, LOW);
+  // delay(10);
+  digitalWrite(VSPI_D3, HIGH);
+}
+
+void print_cmd_data(struct cmd_data data) {
+    Serial.printf("dest: ");
+    Serial.print(data.dest, BIN);
+    Serial.printf("\tsize: ");
+    Serial.print(data.size, BIN);
+    Serial.printf("\twrite: ");
+    Serial.print(data.write, BIN);
+    // Serial.printf("\tReturning: %x" );
+    Serial.println();
+}
+
+void clear_buf(uint8_t* buf) {
+  for(int i = 0; i < 8; i++) {
+    buf[i] = 0;
+  }
+}
+
+void print_buf(uint8_t* buf) {
+  for(int i = 0; i < 8; i++) {
+    Serial.printf("%02X", buf[i]);
+  }
+  Serial.printf("\n");
+}
+
+uint8_t cmd_rec[8] = {0};
+bool bring_in_the_olives = false;
 
 void loop() {   
+  if(fencepost) {
+    fencepost = false;
+    Serial.println("fencepostin");
+    create_input_queue(cmd_rec, 32);
+  }
   // Needs one dedicated core to service CPU SPI requests
   if (cmd_rdy) {
-    // Serial.println("Getting CMD_RDY trigger");
+    wait_for_queue_resilts();
 
-    // Gets CPU command and address (no actual data transfer yet)
-    struct cmd_addr ca = cpu_recv_cmd(false);
+    Serial.print("cmd line: ");
+    Serial.println(cmd_rec[0], BIN);
 
-    Serial.printf("cmd: 0x%x\taddr: 0x%x\t", ca.cmd, ca.addr);
-    // memset(RX_buf, '\0', BUF_SIZE+1);
-    // uint32_t buf = 0x12345678;        // Replace with actual read/write
+    struct cmd_data cmd_yup = parse_cmd(cmd_rec[0], true);
 
-    uint32_t buf = parse_cmd(ca.cmd, ca.addr, true);
+    print_cmd_data(cmd_yup);
+    clear_buf(cmd_rec);
+    uint8_t rec_data[8] = {0};
 
-    spi_slave_transaction_t message;        // Transaction struct
-    spi_slave_transaction_t* msg_rcv;
-    memset(&message, 0, sizeof(message));
-    message.flags = 0;
-    message.length = 32;
-    message.tx_buffer = (void*) &buf;
-
-    message.rx_buffer = (void*) 0;
-    message.user = (void*) 1;
-
-    Serial.printf("Queuing: 0x%x\n", buf);
-
-    // Queues message
-    if(ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
-      Serial.println("Error: couldn't queue message");
-      return;
+    if(cmd_yup.write) {
+      create_input_queue(rec_data, 64);
+    } else {
+      create_input_queue(rec_data, 32);
     }
+    sned_ready();
 
-    digitalWrite(VSPI_D3, LOW);
-    delay(10);
-    digitalWrite(VSPI_D3, HIGH);
+    Serial.println("waiting for second command");
 
-    // Currently, this holds until the SPI transaction completes (polling)
-    // If I cannot find a way to do SPI interrupts, move the UART transaction to a different core
-    if(ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&msg_rcv, portMAX_DELAY)) {
-      Serial.println("Error: couldn't send data");
-      return;
+    wait_for_queue_resilts();
+
+    Serial.print("addr: ");
+    print_buf(rec_data);
+
+    if(!cmd_yup.write) {
+      Serial.println("read brudda");
+      clear_buf(rec_data);
+      rec_data[0] = 0xAB;
+      rec_data[1] = 0xAB;
+      rec_data[2] = 0xDC;
+      rec_data[3] = 0xDC;
+      create_output_queue(rec_data, 32);
+      sned_ready();
+      wait_for_queue_resilts();
+    } else {
+      Serial.println("wrote brudda");
+      bring_in_the_olives = true;
     }
-
-    
+    clear_buf(cmd_rec);
+    create_input_queue(cmd_rec, 32);
     cmd_rdy = false;
+    Serial.println("here we go again");
   }
-  send_MP3("/meglo.wav");
-  Serial.println("\n\ndone");
+  if(bring_in_the_olives) {
+    bring_in_the_olives = false;
+    send_MP3("/meglo.wav");
+  }
+  // Serial.println("\n\ndone");
+  delay(1);
 }
