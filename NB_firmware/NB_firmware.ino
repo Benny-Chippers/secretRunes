@@ -30,19 +30,6 @@
 #include "constants.h"
 
 
-// Archaic: NB-Audio hotwiring for System Verification 1... Consider deleting if music still works well
-// #include <ESP_I2S.h>        // Possibly unneeded (if NB-SB uart streaming goes well)
-// #define I2S_LRC  34
-// #define I2S_BCLK 36
-// #define I2S_DIN  39
-// i2s_data_bit_width_t bps = I2S_DATA_BIT_WIDTH_16BIT;
-// i2s_mode_t mode = I2S_MODE_STD;
-// i2s_slot_mode_t slot = I2S_SLOT_MODE_STEREO;
-// I2SClass i2s;
-// #define MSG_SIZE 512
-// uint8_t TX_buf[BUF_SIZE + 1];  // Tx buffer
-// uint8_t RX_buf[BUF_SIZE + 1];  // Rx buffer
-// uint8_t UART_buf[BUF_SIZE];
 
 SoftwareSerial SBuart(UART_RX, UART_TX);
 const uint32_t BUF_SIZE = 64;  // Bytes in tx/rx buffers
@@ -76,32 +63,6 @@ bool fencepost = true;
 spi_slave_transaction_t message;  // Transaction struct
 
 
-// ARCHAIC (replaced by SoftwareSerial) Initializes UART using given pins
-// bool init_uart(const uart_port_t port, const uint32_t tx, const uint32_t rx) {
-//   strcpy((char*) UART_buf, "This is a UART message from the NB to the SB. ");
-//   uart_config = {
-//     .baud_rate = UART_BAUD,
-//     .data_bits = UART_DATA_8_BITS,
-//     .parity = UART_PARITY_DISABLE,
-//     .stop_bits = UART_STOP_BITS_1,
-//     .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-//   };
-
-//   if (ESP_OK != uart_driver_install(port, BUF_SIZE, BUF_SIZE, 10, &uart_queue, 0)) {
-//     Serial.println("Error: Couldn't add UART");
-//     return false;
-//   }
-//   if (ESP_OK != uart_param_config(port, &uart_config)) {
-//     Serial.println("Error: Couldn't add UART");
-//     return false;
-//   }
-//   if (ESP_OK != uart_set_pin(port, tx, rx, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE)) {
-//     Serial.println("Error: Couldn't add UART");
-//     return false;
-//   }
-//   return true;
-// }
-
 
 // Interrupt and interrupt flag cmd_rdy indicate CPU has a command to send using CMD_RDY/VSPI_D2
 bool cmd_rdy = false;
@@ -118,13 +79,13 @@ bool init_spi(spi_host_device_t host, int cs, bool debug) {
   spi_bus.miso_io_num = VSPI_MISO;
   spi_bus.quadwp_io_num = -1;
   spi_bus.quadhd_io_num = -1;
-
-  pinMode(VSPI_D2, INPUT);   // CMD_RDY
-  pinMode(VSPI_D3, OUTPUT);  // D_RDY
+  // Set Interrupt Pins
+  pinMode(VSPI_D2, INPUT);                    // CMD_RDY
+  pinMode(VSPI_D3, OUTPUT);                   // D_RDY
 
   cmd_rdy = false;
-  digitalWrite(VSPI_D3, HIGH);  // High means inactive, falling indicates ready
-  attachInterrupt(VSPI_D2, cmd_isr, FALLING);
+  digitalWrite(VSPI_D3, HIGH);                // High means inactive, falling indicates ready
+  attachInterrupt(VSPI_D2, cmd_isr, FALLING); // Attachs interrupt
 
   spi_bus.max_transfer_sz = 4096;
   spi_bus.sclk_io_num = VSPI_CLK;
@@ -330,16 +291,26 @@ struct cmd_data parse_cmd(uint8_t cmd, bool debug) {
 
   if (debug) {
     // Serial.printf("dest: %d\tsize: %d\twrite:%d"\n", ret);
-    Serial.printf("dest: %d\tsize: %d\twrite:%d\n", dest, size, write);
+    // Serial.printf("dest: %d\tsize: %d\twrite:%d\n", dest, size, write);
+    Serial.printf("dest: 0b");
+    for (int i = 1; i >= 0; i--) Serial.printf("%d", 1 && (ret.dest & (1 << i)));
+    Serial.printf("\tsize: 0b");
+    for (int i = 3; i >= 0; i--) Serial.printf("%d", 1 && (ret.size & (1 << i)));
+    // Serial.print(ret.size, BIN);
+    Serial.printf("\twrite: 0b");
+    for (int i = 1; i >= 0; i--) Serial.printf("%d", 1 && (ret.write & (1 << i)));
+  
+    // Serial.print(ret.write, BIN);
+    Serial.println();
   }
   return ret;
 }
 
 // Queues an SPI input transaction, the NB waiting on a command from the CPU
-void create_input_queue(uint8_t* buf, int size) {
+void create_input_queue(uint64_t* buf, int size) {
   memset(&message, 0, sizeof(message));
-  message.flags = 0;      // SPI_TRANS_MODE_DIO
-  message.length = size;  // 8-bit cmd, 4-bit buffer, 28-bit addr
+  message.flags = 0;      
+  message.length = size;  // 8-bit cmd, 32-bit addr
   message.tx_buffer = (void*)NULL;
   message.rx_buffer = (void*)buf;
   message.user = (void*)1;
@@ -351,10 +322,10 @@ void create_input_queue(uint8_t* buf, int size) {
 }
 
 // Queues an SPI output transaction, the CPU getting sent data or write results
-void create_output_queue(uint8_t* buf, int size) {
+void create_output_queue(uint64_t* buf, int size) {
   memset(&message, 0, sizeof(message));
-  message.flags = 0;      // SPI_TRANS_MODE_DIO
-  message.length = size;  // 8-bit cmd, 4-bit buffer, 28-bit addr
+  message.flags = 0;      
+  message.length = size;  // 32-bit addr read or write status
   message.tx_buffer = (void*)buf;
   message.rx_buffer = (void*)NULL;
   message.user = (void*)1;
@@ -379,6 +350,7 @@ void send_ready() {
   digitalWrite(VSPI_D3, HIGH);
 }
 
+// Consider deleting: same functionality with debug = true
 void print_cmd_data(struct cmd_data data) {
   Serial.printf("dest: ");
   Serial.print(data.dest, BIN);
@@ -386,26 +358,28 @@ void print_cmd_data(struct cmd_data data) {
   Serial.print(data.size, BIN);
   Serial.printf("\twrite: ");
   Serial.print(data.write, BIN);
-  // Serial.printf("\tReturning: %x" );
   Serial.println();
+  // Serial.printf("\tReturning: %x" );
 }
 
-// Clears 64-bit buffer (replacing with 0`)
-void clear_buf(uint8_t* buf) {
-  for (int i = 0; i < 8; i++) {
-    buf[i] = 0;
-  }
+// Clears 64-bit buffer (replacing with 0s)
+void clear_buf(uint64_t* buf) {
+  *buf = 0;
 }
 
 // Prints 64-bit buffer in hexadecimal
-void print_buf(uint8_t* buf) {
-  for (int i = 0; i < 8; i++) {
-    Serial.printf("%02X", buf[i]);
-  }
+void print_buf(uint64_t* buf) {
+  // for (int i = 0; i < 4; i++) {
+    // Serial.print(buf[i], BIN);
+    for (int j = 61; j >= 0; j--) Serial.printf("%d", 1 && bitRead(*buf, j));
+  // }
   Serial.printf("\n");
 }
 
-uint8_t cmd_rec[8] = { 0 };
+uint64_t cmd_rec = { 0 };
+uint64_t rec_data = { 0 };
+uint32_t payload = { 0 };
+uint32_t addr = { 0 };
 bool bring_in_the_olives = false;
 
 
@@ -434,8 +408,108 @@ void setup() {
   Serial.printf("\nSD Init: %d\n", init_SD(timeout));
 
   init_spi(cpu_host, VSPI_CS, true);
+  if (fencepost) {
+    fencepost = false;
+    Serial.println("Ready to receive cmd");
+    create_input_queue(&cmd_rec, 32);
+  }
   Serial.println("\nNorthbridge initialized");
 }
+
+
+// Main control loop
+void loop() {
+  // Needs one dedicated core to service CPU SPI requests
+  if (cmd_rdy) {
+    cmd_rdy = false;
+    send_ready();
+    uint64_t i = 0;
+    while(cmd_rdy == false) {
+      vTaskDelay(1);
+      if (i++ > 1000) {
+        Serial.println("Waiting for D_RDY");
+        send_ready();
+        i = 0;
+      }
+    }
+    cmd_rdy = false;
+    wait_for_queue_results();  // Makes sure cmd is received
+
+    Serial.print("\ncmd line: ");
+    Serial.println(cmd_rec & 0xFF, BIN);
+
+    struct cmd_data cmd = parse_cmd(cmd_rec & 0xFF, true);
+
+    // print_cmd_data(cmd);
+    clear_buf(&cmd_rec);
+    clear_buf(&rec_data);
+    if (cmd.write) {
+      create_input_queue(&rec_data, 64);
+    } else {
+      create_input_queue(&rec_data, 32);
+    }
+    send_ready();
+
+    Serial.println("waiting for addr");
+    while (!cmd_rdy) vTaskDelay(1);
+    wait_for_queue_results();
+    payload = 0;
+    Serial.print("addr: 0b");
+    addr = rec_data;
+    if (cmd.write) {
+      // for (uint8_t i = 61; i > 0; i--) Serial.print(bitRead(rec_data, i));
+      payload = (uint32_t) (rec_data >> 32);
+      // if (debug) {
+        for (uint8_t i = 31; i > 0; i--) Serial.print(bitRead(addr, i));
+        Serial.printf("\ndata: 0b");
+        for (uint8_t i = 31; i > 0; i--) Serial.print(bitRead(payload, i));
+        Serial.println();
+      // }
+    } else {
+      // for (uint8_t i = 31; i > 0; i--) Serial.print(bitRead(rec_data, i));
+      // Serial.println();
+      // if (debug) {
+        for (uint8_t i = 31; i > 0; i--) Serial.print(bitRead(addr, i));
+        Serial.println();
+      // }
+    }
+
+
+
+    // print_buf(rec_data);
+
+    // if (!cmd.write) {                 // write == 0 means reading
+    //   Serial.println("Read command");
+    //   clear_buf(rec_data);
+
+    //   // Currently sending test data. Implement actual read system using addr...
+    //   rec_data[0] = 0xFF;
+    //   rec_data[1] = 0;
+    //   rec_data[2] = 0xFF;
+    //   rec_data[3] = 0;
+    //   create_output_queue(rec_data, 32);
+    //   send_ready();
+    //   wait_for_queue_results();
+    // } else {
+    //   Serial.println("Write command");
+
+    //   // Add control flow so only SB-targetted writes trigger send_MP3
+    //   bring_in_the_olives = true;
+    // }
+    clear_buf(&cmd_rec);
+    create_input_queue(&cmd_rec, 32);
+    cmd_rdy = false;
+  }
+
+  // // If RX'ed a CPU write command to SB, play music
+  // if (bring_in_the_olives) {
+  //   bring_in_the_olives = false;
+  //   // send_MP3("/meglo.wav");
+  //   delay(2500);
+  // }
+  delay(1);
+}
+
 
 
 // memset(TX_buf, '\0', BUF_SIZE);  // Prepares communication buffers
@@ -487,68 +561,3 @@ void setup() {
 // Serial.printf("Sample Text Write: %d\n", ret);
 // FL_readChar(10, 10+strlen(str2));
 // delay(100);
-
-
-// Main control loop
-void loop() {
-  if (fencepost) {
-    fencepost = false;
-    Serial.println("fencepostin");
-    create_input_queue(cmd_rec, 32);
-  }
-  // Needs one dedicated core to service CPU SPI requests
-  if (cmd_rdy) {
-    wait_for_queue_results();  // Makes sure cmd is received
-
-    Serial.print("cmd line: ");
-    Serial.println(cmd_rec[0], BIN);
-
-    struct cmd_data cmd = parse_cmd(cmd_rec[0], true);
-
-    print_cmd_data(cmd);
-    clear_buf(cmd_rec);
-    uint8_t rec_data[8] = { 0 };
-
-    if (cmd.write) {
-      create_input_queue(rec_data, 64);
-    } else {
-      create_input_queue(rec_data, 32);
-    }
-    send_ready();
-
-    Serial.println("waiting for second command");
-
-    wait_for_queue_results();
-
-    Serial.print("addr: ");
-    print_buf(rec_data);
-
-    if (!cmd.write) {
-      Serial.println("Read command");
-      clear_buf(rec_data);
-      rec_data[0] = 0xAB;
-      rec_data[1] = 0xAB;
-      rec_data[2] = 0xDC;
-      rec_data[3] = 0xDC;
-      create_output_queue(rec_data, 32);
-      send_ready();
-      wait_for_queue_results();
-    } else {
-      Serial.println("Write command");
-
-      // Add control flow so only SB-targetted writes trigger send_
-      bring_in_the_olives = true;
-    }
-    clear_buf(cmd_rec);
-    create_input_queue(cmd_rec, 32);
-    cmd_rdy = false;
-    Serial.println("here we go again");
-  }
-
-  // If RX'ed a CPU write command to SB, play music
-  if (bring_in_the_olives) {
-    bring_in_the_olives = false;
-    send_MP3("/meglo.wav");
-  }
-  delay(1);
-}

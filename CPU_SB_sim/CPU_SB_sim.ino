@@ -35,7 +35,7 @@ spi_dma_chan_t dma_config = SPI_DMA_DISABLED;
 uart_config_t uart_config;
 QueueHandle_t uart_queue;
 
-bool d_rdy;
+bool d_rdy = false;
 void IRAM_ATTR d_isr() {
   d_rdy = true;
 }
@@ -69,14 +69,13 @@ void setup() {
   memset(&guest_config, 0, sizeof(guest_config));
 
   guest_config = {
-    .command_bits = 0,          // should be 8
-    .address_bits = 0,         // should be 28
-    .dummy_bits = 0,            // should be 4
+    .command_bits = 0, 
+    .address_bits = 0, 
+    .dummy_bits = 0, 
     .mode = 0,
-    .clock_speed_hz = 1 * 1000 * 1000,
+    .clock_speed_hz = 1 * 1000,
     .spics_io_num = VSPI_CS,
     .flags = 0,
-    // .flags = 0,
     .queue_size = 3,
   };
 
@@ -98,7 +97,7 @@ void setup() {
 
 
 
-bool cpu_send_cmd(uint8_t cmd, uint32_t addr) {
+bool cpu_send_cmd(uint8_t cmd, uint32_t addr_i, uint32_t payload, bool debug) {
 // To send data to peripheral, make a spi_transaction_t struct and
   // call spi_device_queue_trans/spi_device_get_trans_result or spi_device_transmit
   spi_transaction_t message;
@@ -106,40 +105,65 @@ bool cpu_send_cmd(uint8_t cmd, uint32_t addr) {
   // uint8_t cmd_addr = cmd;
 
   static uint32_t buf = cmd;
+  static uint64_t addr = ((uint64_t)addr_i<<32) | payload;
+  
 
-  // Serial.println("before flags");
   message.flags = 0; //SPI_TRANS_USE_TXDATA
   message.length = 32;
-  // message.mode = 
   message.tx_buffer = (void*) &buf;
-  // memcpy(message.tx_data, &cmd_addr, 4);
-
   message.rx_buffer = (void*) NULL;
   message.user = (void*) 1;
   
-  // SPI Transmission
+  d_rdy = false;
+  send_ready();
+  uint64_t i = 0;
+  while (!d_rdy) {
+    vTaskDelay(1);
+    if (i++ > 1000) {
+      Serial.println("Waiting for D_RDY");
+      send_ready();
+      i = 0;
+    }
+  }
+  d_rdy = false;
+
+  // SPI Transmission to send cmd word
+  if (ESP_OK != spi_device_transmit(guest_name, &message)) {
+    Serial.println("Error: Couldn't transmit message");
+    return false;
+  }
+  send_ready();
+
+  memset(&message, 0, sizeof(message));
+
+  message.flags = 0; //SPI_TRANS_USE_TXDATA
+  if (1 && (cmd & 0b00000011)) {  // write cmd, need to send payload data with address
+    message.length = 64;
+  } else {
+    message.length = 32;
+  }
+  
+  message.tx_buffer = (void*) &addr;
+  message.rx_buffer = (void*) NULL;
+  message.user = (void*) 1;
+
+  // SPI Transmission to send addr word
   if (ESP_OK != spi_device_transmit(guest_name, &message)) {
     Serial.println("Error: Couldn't transmit message");
     return false;
   }
 
-  memset(&message, 0, sizeof(message));
+  if (debug) {
+    Serial.print("cmd: 0b");
+    for (int i = 31; i >= 0; i--) Serial.print(bitRead(buf, i));
+    Serial.println("");
+  
 
-  // Serial.println("before flags");
-  message.flags = 0; //SPI_TRANS_USE_TXDATA
-  message.length = 32;
-  // message.mode = 
-  message.tx_buffer = (void*) &addr;
-  // memcpy(message.tx_data, &cmd_addr, 4);
-
-  message.rx_buffer = (void*) NULL;
-  message.user = (void*) 1;
-
-
-  // SPI Transmission
-  if (ESP_OK != spi_device_transmit(guest_name, &message)) {
-    Serial.println("Error: Couldn't transmit message");
-    return false;
+    Serial.print("addr: 0b");
+    // Serial.print(addr, BIN);
+    for (int i = 61; i >= 0; i--) Serial.print(bitRead(addr, i));
+    
+    Serial.println("");
   }
 
   // Serial.printf("Sent command to NB:");
@@ -147,77 +171,57 @@ bool cpu_send_cmd(uint8_t cmd, uint32_t addr) {
   //   Serial.print(bitRead(cmd_addr, i));
   // }
   // Serial.printf("\taddr: ");
-  // for (int i = 25; i >= 0; i--) {
-  //   Serial.print(bitRead(addr, i));
-  // }
+  // 
   // Serial.printf("\n");
   return true;
 }
 
-
-
-
-void loop() {
-  
-  
-  Serial.printf("Sending cmd & addr: %d\n", cpu_send_cmd(0xFF, 0x87654321));
-  
+// Signals CMD_RDY so NB knows we're ready to transmit
+void send_ready() {
   digitalWrite(VSPI_D2, LOW);
-  delay(100);
   digitalWrite(VSPI_D2, HIGH);
+}
 
-  // delay(2000);
+// Simulation of one CPU memory/SB request
+void loop() {
+  Serial.printf("Sending cmd & addr: %d\n", cpu_send_cmd(0b0011011, 0xFF0000FF, 0x00FF00FF, true));
+  // digitalWrite(VSPI_D2, LOW);
+  // delay(10);
+  // digitalWrite(VSPI_D2, HIGH);
 
-  if (d_rdy) {
-    Serial.println("Getting D_RDY trigger");
-    // memset(RX_buf, 0, 64);
-    static uint32_t buf = 0;
+  delay(20);
 
-    spi_transaction_t message;
-    memset(&message, 0, sizeof(message));
+  // if (d_rdy) {
+  //   Serial.println("Getting D_RDY trigger");
+  //   uint32_t buf = 0;
+  //   memset(&buf, 0, sizeof(buf));
 
-    // Serial.println("before flags");
-    message.flags = 0; //SPI_TRANS_MODE_DIO
-    message.length = 32;
-    message.rxlength = 32;
-    // message.mode = 
-    message.tx_buffer = (void*) NULL;
-    message.rx_buffer = (void*) &buf;
+  //   spi_transaction_t message;
+  //   memset(&message, 0, sizeof(message));
 
-    message.user = (void*) 1;
+  //   // Serial.println("before flags");
+  //   message.flags = 0; //SPI_TRANS_MODE_DIO
+  //   message.length = 32;
+  //   message.rxlength = 32;
+  //   // message.mode = 
+  //   message.tx_buffer = (void*) NULL;
+  //   message.rx_buffer = (void*) &buf;
+
+  //   message.user = (void*) 1;
     
-    // SPI Receipt
-    if (ESP_OK != spi_device_transmit(guest_name, &message)) {
-      Serial.println("Error: Couldn't transmit message");
-      return;
-    }
+  //   // SPI Receipt
+  //   if (ESP_OK != spi_device_transmit(guest_name, &message)) {
+  //     Serial.println("Error: Couldn't transmit message");
+  //     return;
+  //   }
 
-    Serial.printf("SPI NB: %x\n", buf);
+  //   Serial.printf("SPI NB: 0b");
+  //   for (uint8_t i = 31; i > 0; i--) Serial.printf("%d", 1 && (buf & (1 << i)));
 
-    
-    
-    
-    d_rdy = false;
-  }
+  //   // Serial.print(buf, BIN);
+  //   Serial.println("");
 
-
-  // memset((TX_buf), 0xF, 4);
-  // To send data to peripheral, make a spi_transaction_t struct and
-  // call spi_device_queue_trans/spi_device_get_trans_result or spi_device_transmit
-  
-  // memset(TX_buf, 0xFF, BUF_SIZE);  // Prepares communication buffers
-  
-
-
-  // Tests SB->NB Communication
-  // memset(UART_buf, '\0', BUF_SIZE);
-  // uart_read_bytes(UART_PORT, UART_buf, BUF_SIZE - 1, 1000);    
-  // Serial.print("UART NB: ");
-  // Serial.println((char*) UART_buf);
-  // uart_flush(UART_PORT);
-  // delay(100);
-
-  // strcpy((char*) UART_buf, "This is a UART message from the SB to the NB. \n");
-
+  //   d_rdy = false;
+  // }
   delay(2500);
 }
