@@ -73,7 +73,7 @@ void setup() {
     .address_bits = 0, 
     .dummy_bits = 0, 
     .mode = 0,
-    .clock_speed_hz = 1 * 1000,
+    .clock_speed_hz = 1 * 1000 * 1000,
     .spics_io_num = VSPI_CS,
     .flags = 0,
     .queue_size = 3,
@@ -105,7 +105,7 @@ bool cpu_send_cmd(uint8_t cmd, uint32_t addr_i, uint32_t payload, bool debug) {
   // uint8_t cmd_addr = cmd;
 
   static uint32_t buf = cmd;
-  static uint64_t addr = ((uint64_t)addr_i<<32) | payload;
+  static uint64_t addr = ((uint64_t)payload<<32) | addr_i;
   
 
   message.flags = 0; //SPI_TRANS_USE_TXDATA
@@ -184,44 +184,56 @@ void send_ready() {
 
 // Simulation of one CPU memory/SB request
 void loop() {
-  Serial.printf("Sending cmd & addr: %d\n", cpu_send_cmd(0b0011011, 0xFF0000FF, 0x00FF00FF, true));
+  Serial.printf("Sending cmd & addr: %d\n", cpu_send_cmd(0b10101011, 0x0F0F0F0F, 0xF0F0F0F0, true));
   // digitalWrite(VSPI_D2, LOW);
   // delay(10);
   // digitalWrite(VSPI_D2, HIGH);
 
   delay(20);
 
-  // if (d_rdy) {
-  //   Serial.println("Getting D_RDY trigger");
-  //   uint32_t buf = 0;
-  //   memset(&buf, 0, sizeof(buf));
+  while(d_rdy == false) {
+    vTaskDelay(1);
+    uint64_t i = 0;
+    if (i++ > 1000) {
+      Serial.println("Waiting for D_RDY, a second time");
+      send_ready();
+      i = 0;
+    }
+  }
+  d_rdy = false;
 
-  //   spi_transaction_t message;
-  //   memset(&message, 0, sizeof(message));
 
-  //   // Serial.println("before flags");
-  //   message.flags = 0; //SPI_TRANS_MODE_DIO
-  //   message.length = 32;
-  //   message.rxlength = 32;
-  //   // message.mode = 
-  //   message.tx_buffer = (void*) NULL;
-  //   message.rx_buffer = (void*) &buf;
+  if (d_rdy) {
+    Serial.println("Getting D_RDY trigger");
+    uint32_t buf = 0;
+    memset(&buf, 0, sizeof(buf));
 
-  //   message.user = (void*) 1;
+    spi_transaction_t message;
+    memset(&message, 0, sizeof(message));
+
+    // Serial.println("before flags");
+    message.flags = 0; //SPI_TRANS_MODE_DIO
+    message.length = 32;
+    message.rxlength = 32;
+    // message.mode = 
+    message.tx_buffer = (void*) NULL;
+    message.rx_buffer = (void*) &buf;
+
+    message.user = (void*) 1;
     
-  //   // SPI Receipt
-  //   if (ESP_OK != spi_device_transmit(guest_name, &message)) {
-  //     Serial.println("Error: Couldn't transmit message");
-  //     return;
-  //   }
+    // SPI Receipt
+    if (ESP_OK != spi_device_transmit(guest_name, &message)) {
+      Serial.println("Error: Couldn't transmit message");
+      return;
+    }
 
-  //   Serial.printf("SPI NB: 0b");
-  //   for (uint8_t i = 31; i > 0; i--) Serial.printf("%d", 1 && (buf & (1 << i)));
+    Serial.printf("SPI NB: 0b");
+    for (uint8_t i = 31; i > 0; i--) Serial.printf("%d", 1 && (buf & (1 << i)));
 
-  //   // Serial.print(buf, BIN);
-  //   Serial.println("");
+    // Serial.print(buf, BIN);
+    Serial.println("");
 
-  //   d_rdy = false;
-  // }
+    d_rdy = false;
+  }
   delay(2500);
 }

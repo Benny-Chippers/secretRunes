@@ -9,8 +9,8 @@
 #include "constants.h"
 
 // Set one of the defines below to 1 to select the hardware configuration
-#define BIG_BOARD 1     // Macrocontroller v1
-#define NB_MB 0         // Northbridge/Memory Block extended devkit
+#define BIG_BOARD 0     // Macrocontroller v1
+#define NB_MB 1         // Northbridge/Memory Block extended devkit
 
 
 #if BIG_BOARD       // Macrocontroller v1   

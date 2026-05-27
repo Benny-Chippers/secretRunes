@@ -330,10 +330,12 @@ void create_output_queue(uint64_t* buf, int size) {
   message.rx_buffer = (void*)NULL;
   message.user = (void*)1;
 
+  
   // Queues message
   if (ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
     Serial.println("Error: couldn't request command");
   }
+  send_ready();                         // For actual program, send trigger before transaciton
 }
 
 // Gets NB-CPU transaction results
@@ -349,6 +351,21 @@ void send_ready() {
   digitalWrite(VSPI_D3, LOW);
   digitalWrite(VSPI_D3, HIGH);
 }
+
+// Waits until CPU triggers CMD_RDY
+void get_ready() {
+  while(cmd_rdy == false) {
+    vTaskDelay(1);
+    uint64_t i = 0;
+    if (i++ > 1000) {
+      Serial.println("Waiting for CMD_RDY");
+      send_ready();
+      i = 0;
+    }
+  }
+  cmd_rdy = false;
+}
+
 
 // Consider deleting: same functionality with debug = true
 void print_cmd_data(struct cmd_data data) {
@@ -367,12 +384,9 @@ void clear_buf(uint64_t* buf) {
   *buf = 0;
 }
 
-// Prints 64-bit buffer in hexadecimal
-void print_buf(uint64_t* buf) {
-  // for (int i = 0; i < 4; i++) {
-    // Serial.print(buf[i], BIN);
-    for (int j = 61; j >= 0; j--) Serial.printf("%d", 1 && bitRead(*buf, j));
-  // }
+// Prints n-bit buffer in hexadecimal
+void print_buf(uint64_t* buf, int n) {
+  for (int j = n-1; j >= 0; j--) Serial.printf("%d",bitRead(*buf, j));
   Serial.printf("\n");
 }
 
@@ -424,82 +438,60 @@ void loop() {
     cmd_rdy = false;
     send_ready();
     uint64_t i = 0;
-    while(cmd_rdy == false) {
-      vTaskDelay(1);
-      if (i++ > 1000) {
-        Serial.println("Waiting for D_RDY");
-        send_ready();
-        i = 0;
-      }
-    }
-    cmd_rdy = false;
+    get_ready();
     wait_for_queue_results();  // Makes sure cmd is received
 
     Serial.print("\ncmd line: ");
     Serial.println(cmd_rec & 0xFF, BIN);
 
     struct cmd_data cmd = parse_cmd(cmd_rec & 0xFF, true);
-
-    // print_cmd_data(cmd);
     clear_buf(&cmd_rec);
     clear_buf(&rec_data);
-    if (cmd.write) {
+
+    if (cmd.write) {                      // Prep buffer form address (and write payload)
       create_input_queue(&rec_data, 64);
     } else {
       create_input_queue(&rec_data, 32);
     }
     send_ready();
 
-    Serial.println("waiting for addr");
+    Serial.println("Waiting for addr");
     while (!cmd_rdy) vTaskDelay(1);
     wait_for_queue_results();
     payload = 0;
     Serial.print("addr: 0b");
-    addr = rec_data;
+    addr = rec_data & 0xFFFFFFFF;
     if (cmd.write) {
-      // for (uint8_t i = 61; i > 0; i--) Serial.print(bitRead(rec_data, i));
       payload = (uint32_t) (rec_data >> 32);
-      // if (debug) {
-        for (uint8_t i = 31; i > 0; i--) Serial.print(bitRead(addr, i));
-        Serial.printf("\ndata: 0b");
-        for (uint8_t i = 31; i > 0; i--) Serial.print(bitRead(payload, i));
-        Serial.println();
-      // }
+      print_buf((uint64_t*) &addr, 32);
+      Serial.printf("data: 0b");
+      print_buf((uint64_t*) &payload, 32);
+      Serial.println();
     } else {
-      // for (uint8_t i = 31; i > 0; i--) Serial.print(bitRead(rec_data, i));
-      // Serial.println();
-      // if (debug) {
-        for (uint8_t i = 31; i > 0; i--) Serial.print(bitRead(addr, i));
-        Serial.println();
-      // }
+      print_buf((uint64_t*) &addr, 32);
     }
 
+    if (!cmd.write) {                 // write == 0 means reading
+      Serial.println("Read command");
+      clear_buf(&rec_data);
 
+    } else {
+      Serial.println("Write command");
 
-    // print_buf(rec_data);
+      // Add control flow so only SB-targetted writes trigger send_MP3
+      bring_in_the_olives = true;
+    }
+    // Currently sending test data. Implement actual read system using addr...
+    rec_data = 0xABCDEF01;
 
-    // if (!cmd.write) {                 // write == 0 means reading
-    //   Serial.println("Read command");
-    //   clear_buf(rec_data);
-
-    //   // Currently sending test data. Implement actual read system using addr...
-    //   rec_data[0] = 0xFF;
-    //   rec_data[1] = 0;
-    //   rec_data[2] = 0xFF;
-    //   rec_data[3] = 0;
-    //   create_output_queue(rec_data, 32);
-    //   send_ready();
-    //   wait_for_queue_results();
-    // } else {
-    //   Serial.println("Write command");
-
-    //   // Add control flow so only SB-targetted writes trigger send_MP3
-    //   bring_in_the_olives = true;
-    // }
+    create_output_queue(&rec_data, 32);
+    wait_for_queue_results();
     clear_buf(&cmd_rec);
     create_input_queue(&cmd_rec, 32);
-    cmd_rdy = false;
   }
+
+
+  cmd_rdy = false;
 
   // // If RX'ed a CPU write command to SB, play music
   // if (bring_in_the_olives) {
@@ -507,7 +499,8 @@ void loop() {
   //   // send_MP3("/meglo.wav");
   //   delay(2500);
   // }
-  delay(1);
+  vTaskDelay(100);
+  Serial.println("Repeating main loop");
 }
 
 
