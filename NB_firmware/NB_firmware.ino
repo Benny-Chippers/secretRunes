@@ -402,104 +402,128 @@ bool bring_in_the_olives = false;
 void setup() {
   Serial.begin(115200);
   randomSeed(time(NULL));
-  delay(1);
+  delay(2500);
   SBuart.begin(UART_BAUD);
 
-  Serial.println("HSPI Init...");
+  Serial.println("\nHSPI Init...");
 
 
   // Flash initialization
   SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_FL);
-  ret = flash.begin(MB(16));
-  Serial.printf("\nFlash Init: %d\t\tJEDEC ID: 0x%x\n", ret, flash.getJEDECID());
+  ret = 0;
+  uint8_t i = 0;
+  while((ret == 0) && (i++ < 20)) {
+    ret = flash.begin(MB(16));
+    delay(100);
+    Serial.println("initing flash");
+  }
+  Serial.printf("Flash Init: %d\tJEDEC ID: 0x%x\n", ret, flash.getJEDECID());
   FL_MAX = flash.getCapacity();
-  flash.setClock(FL_FREQ);
+  // flash.setClock(FL_FREQ);
   Serial.printf("%d kB Capacity\n", FL_MAX / 1000);
-
+  while(!FL_clear());
 
   // SD initialization
-  double timeout = 10;  // Time to wait on SD card
+  double timeout = 0;  // Time to wait on SD card
   Serial.printf("\nSD Init: %d\n", init_SD(timeout));
 
-  init_spi(cpu_host, VSPI_CS, true);
-  if (fencepost) {
-    fencepost = false;
-    Serial.println("Ready to receive cmd");
-    create_input_queue(&cmd_rec, 32);
-  }
+//   init_spi(cpu_host, VSPI_CS, true);
+//   if (fencepost) {
+//     fencepost = false;
+//     Serial.println("Ready to receive cmd");
+//     create_input_queue(&cmd_rec, 32);
+//   }
   Serial.println("\nNorthbridge initialized");
 }
 
 
 // Main control loop
 void loop() {
-  // Needs one dedicated core to service CPU SPI requests
-  if (cmd_rdy) {
-    cmd_rdy = false;
-    send_ready();
-    uint64_t i = 0;
-    get_ready();
-    wait_for_queue_results();  // Makes sure cmd is received
-
-    Serial.print("\ncmd line: ");
-    Serial.println(cmd_rec & 0xFF, BIN);
-
-    struct cmd_data cmd = parse_cmd(cmd_rec & 0xFF, true);
-    clear_buf(&cmd_rec);
-    clear_buf(&rec_data);
-
-    if (cmd.write) {                      // Prep buffer form address (and write payload)
-      create_input_queue(&rec_data, 64);
-    } else {
-      create_input_queue(&rec_data, 32);
-    }
-    send_ready();
-
-    Serial.println("Waiting for addr");
-    while (!cmd_rdy) vTaskDelay(1);
-    wait_for_queue_results();
-    payload = 0;
-    Serial.print("addr: 0b");
-    addr = rec_data & 0xFFFFFFFF;
-    if (cmd.write) {
-      payload = (uint32_t) (rec_data >> 32);
-      print_buf((uint64_t*) &addr, 32);
-      Serial.printf("data: 0b");
-      print_buf((uint64_t*) &payload, 32);
-      Serial.println();
-    } else {
-      print_buf((uint64_t*) &addr, 32);
-    }
-
-    if (!cmd.write) {                 // write == 0 means reading
-      Serial.println("Read command");
-      clear_buf(&rec_data);
-
-    } else {
-      Serial.println("Write command");
-
-      // Add control flow so only SB-targetted writes trigger send_MP3
-      bring_in_the_olives = true;
-    }
-    // Currently sending test data. Implement actual read system using addr...
-    rec_data = 0xABCDEF01;
-
-    create_output_queue(&rec_data, 32);
-    wait_for_queue_results();
-    clear_buf(&cmd_rec);
-    create_input_queue(&cmd_rec, 32);
-  }
+  // char str2[] = "This is a sample message.";
+  // ret = 0;
+  // int i = 0;
+  // // ret = 
+  // uint32_t buf = ;
+  Serial.println("About to write to flash");
+  bool ok = flash.eraseSector(0);
+  if (!ok) flash.error(VERBOSE);
+  delay(100);
+  ok = flash.writeByte(0, 0xAB);
+  Serial.printf("Sample Text Write: %d\n", ok);
+  if (!ok) flash.error(VERBOSE);
+  Serial.printf("Read Results: 0x%x\n", flash.readByte(0));
+  // FL_printChar(10, 10+strlen(str2));
 
 
-  cmd_rdy = false;
 
-  // // If RX'ed a CPU write command to SB, play music
-  // if (bring_in_the_olives) {
-  //   bring_in_the_olives = false;
-  //   // send_MP3("/meglo.wav");
-  //   delay(2500);
+  // // Needs one dedicated core to service CPU SPI requests
+  // if (cmd_rdy) {
+  //   cmd_rdy = false;
+  //   send_ready();
+  //   uint64_t i = 0;
+  //   get_ready();
+  //   wait_for_queue_results();  // Makes sure cmd is received
+
+  //   Serial.print("\ncmd line: 0b");
+  //   // cmd_rec &= 0xFF;
+  //   for (int i = 7; i >= 0; i--) Serial.printf("%d", 1 && (cmd_rec & (1 << i)));
+  //   Serial.println();
+
+  //   struct cmd_data cmd = parse_cmd(cmd_rec, true);
+  //   clear_buf(&cmd_rec);
+  //   clear_buf(&rec_data);
+
+  //   if (cmd.write) {                      // Write cmd needs addr & write payload
+  //     create_input_queue(&rec_data, 64);
+  //   } else {                              // Reads cmd just needs addr
+  //     create_input_queue(&rec_data, 32);
+  //   }
+  //   send_ready();
+
+  //   Serial.println("Waiting for addr");
+  //   while (!cmd_rdy) vTaskDelay(100);
+  //   wait_for_queue_results();
+  //   payload = 0;
+  //   Serial.print("addr: 0b");
+  //   addr = (uint32_t)(rec_data & 0xFFFFFFFF);
+  //   if (cmd.write) {
+  //     payload = (uint32_t) (rec_data >> 32);
+  //     print_buf((uint64_t*) &addr, 32);
+  //     Serial.printf("data: 0b");
+  //     print_buf((uint64_t*) &payload, 32);
+  //   } else {
+  //     print_buf((uint64_t*) &addr, 32);
+
+  //   }
+
+  //   if (!cmd.write) {                 // write == 0 means reading
+  //     Serial.println("Read command");
+  //   } else {
+  //     Serial.println("Write command");
+  //     // Add control flow so only SB-targetted writes trigger send_MP3
+  //     bring_in_the_olives = true;
+  //   }
+
+  //   // Currently sending test data. Implement actual read system using addr...
+  //   clear_buf(&rec_data);
+  //   // rec_data = 0xABCDEF01;
+
+  //   // create_output_queue(&rec_data, 32);
+  //   // wait_for_queue_results();
+  //   // Serial.println("Allegedly sent R/W-Status data");
+  //   clear_buf(&cmd_rec);
+  //   create_input_queue(&cmd_rec, 32);
   // }
-  vTaskDelay(100);
+  // cmd_rdy = false;
+
+  // // // If RX'ed a CPU write command to SB, play music
+  // // if (bring_in_the_olives) {
+  // //   bring_in_the_olives = false;
+  // //   // send_MP3("/meglo.wav");
+  // //   delay(2500);
+  // // }
+
+  delay(500);
   Serial.println("Repeating main loop");
 }
 

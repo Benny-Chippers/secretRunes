@@ -23,7 +23,7 @@ char* wavs[NUM_WAV] = {
 #define UART_PORT UART_NUM_2
 #define TRAN_SIZE 32768.0    // Size of UART transactions (what units?)
 #define UART_BAUD 74880      // Baud Rate (symbols/sec) for NB-SB UART
-#define FL_FREQ 10*1000 // in Hz
+#define FL_FREQ 1*1000*1000 // in Hz
 #define PS_FREQ FL_FREQ
 
 

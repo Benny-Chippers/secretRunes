@@ -73,7 +73,7 @@ void setup() {
     .address_bits = 0, 
     .dummy_bits = 0, 
     .mode = 0,
-    .clock_speed_hz = 1 * 1000 * 1000,
+    .clock_speed_hz = 1 * 1000,
     .spics_io_num = VSPI_CS,
     .flags = 0,
     .queue_size = 3,
@@ -152,6 +152,7 @@ bool cpu_send_cmd(uint8_t cmd, uint32_t addr_i, uint32_t payload, bool debug) {
     Serial.println("Error: Couldn't transmit message");
     return false;
   }
+  send_ready();
 
   if (debug) {
     Serial.print("cmd: 0b");
@@ -189,8 +190,8 @@ void loop() {
   // delay(10);
   // digitalWrite(VSPI_D2, HIGH);
 
-  delay(20);
-
+  // delay(20);
+  d_rdy = false;
   while(d_rdy == false) {
     vTaskDelay(1);
     uint64_t i = 0;
@@ -205,7 +206,7 @@ void loop() {
 
   if (d_rdy) {
     Serial.println("Getting D_RDY trigger");
-    uint32_t buf = 0;
+    static uint32_t buf = 0;
     memset(&buf, 0, sizeof(buf));
 
     spi_transaction_t message;
@@ -220,7 +221,7 @@ void loop() {
     message.rx_buffer = (void*) &buf;
 
     message.user = (void*) 1;
-    
+    vTaskDelay(100);    
     // SPI Receipt
     if (ESP_OK != spi_device_transmit(guest_name, &message)) {
       Serial.println("Error: Couldn't transmit message");
@@ -230,10 +231,10 @@ void loop() {
     Serial.printf("SPI NB: 0b");
     for (uint8_t i = 31; i > 0; i--) Serial.printf("%d", 1 && (buf & (1 << i)));
 
-    // Serial.print(buf, BIN);
+    // // Serial.print(buf, BIN);
     Serial.println("");
 
     d_rdy = false;
   }
-  delay(2500);
+  vTaskDelay(2500);
 }
