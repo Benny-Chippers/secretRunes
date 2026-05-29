@@ -143,7 +143,10 @@ size_t read_SD_to_SB(const char filepath[], size_t size, uint8_t* buf) {
   if (SD.exists(filepath)) {
     File f = SD.open(filepath);
     size_t sent = 0;
+    bool hit_data = false;
     while (f.available()) {
+      // Add compression after data header 'd''a''t''a'
+      //  (aside from header, drop two bytes every other two bytes)
       for (size_t i = 0; i < TRAN_SIZE; i++) {
         if (f.available()) {
           buf[i] = f.read();
@@ -211,9 +214,9 @@ size_t send_MP3(const char filepath[]) {
 
 // Timeout is number of seconds to wait (it'll try every 2.5 sec)
 bool init_SD(double timeout) {
-  hspi.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_SD);
+  SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_SD);
   double elapsed = 0;
-  while (!SD.begin(HSPI_CS_SD, hspi) & (elapsed < timeout)) {  // Tries to connect for 7.5 seconds
+  while (!SD.begin(HSPI_CS_SD, SPI) & (elapsed < timeout)) {  // Tries to connect for 2.5 seconds
     Serial.println("Error: SD Card mount failed");
     delay(2500);
     elapsed += 2.5;
@@ -236,10 +239,26 @@ bool FL_clear() {
   return true;
 }
 
-void FL_printHex(uint32_t start, uint32_t end) {
-  uint8_t test[end - start];
+uint32_t FL_printHex32(uint32_t start) {
+  uint32_t test = 0;
   Serial.printf("Reading from flash:\n");
-  flash.readByteArray(start, (uint8_t*)&test, end, true);
+  ret = 0;
+  // for (uint32_t i = start; i < end; i++) {
+  test = flash.readULong(start, true);
+  Serial.printf("%x", (uint32_t)test);
+  Serial.printf("\nEnd read\n");
+  return test;
+}
+
+void FL_printHex(uint32_t start, uint32_t end) {
+  uint8_t test[end - start + 1] = { 0 };
+  Serial.printf("Reading from flash:\n");
+  ret = 0;
+  ret = flash.readByteArray(start, (uint8_t*)&test, end, true);
+  if (!ret) {
+    Serial.println("Error: Couldn't read flash");
+    return;
+  }
   for (uint32_t i = start; i < end; i++) {
     if ((i % (0xFF + 1)) == 0) {
       Serial.printf("\n0x%x\t", i);
@@ -410,21 +429,27 @@ void setup() {
 
   // Flash initialization
   SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_FL);
+  // SPI.setFrequency(FL_FREQ);
   ret = 0;
   uint8_t i = 0;
   while((ret == 0) && (i++ < 20)) {
-    ret = flash.begin(MB(16));
-    delay(100);
+    ret = flash.begin(16*1000*1000);
+    delay(250);
     Serial.println("initing flash");
   }
-  Serial.printf("Flash Init: %d\tJEDEC ID: 0x%x\n", ret, flash.getJEDECID());
+  Serial.printf("Flash Init: %d\tJEDEC ID: 0x%x\t", ret, flash.getJEDECID());
   FL_MAX = flash.getCapacity();
-  // flash.setClock(FL_FREQ);
   Serial.printf("%d kB Capacity\n", FL_MAX / 1000);
-  while(!FL_clear());
+  // flash.setClock(FL_FREQ);
+  // while(!FL_clear());
+
+
+  // Serial.print("Flash powerup");
+  // if (flash.powerUp()) Serial.println(" successful");
+  // else Serial.println(" unsuccessful");
 
   // SD initialization
-  double timeout = 0;  // Time to wait on SD card
+  double timeout = 10;  // Time to wait on SD card
   Serial.printf("\nSD Init: %d\n", init_SD(timeout));
 
 //   init_spi(cpu_host, VSPI_CS, true);
@@ -436,24 +461,34 @@ void setup() {
   Serial.println("\nNorthbridge initialized");
 }
 
-
 // Main control loop
 void loop() {
-  // char str2[] = "This is a sample message.";
-  // ret = 0;
-  // int i = 0;
-  // // ret = 
-  // uint32_t buf = ;
   Serial.println("About to write to flash");
-  bool ok = flash.eraseSector(0);
-  if (!ok) flash.error(VERBOSE);
-  delay(100);
-  ok = flash.writeByte(0, 0xAB);
-  Serial.printf("Sample Text Write: %d\n", ok);
-  if (!ok) flash.error(VERBOSE);
-  Serial.printf("Read Results: 0x%x\n", flash.readByte(0));
-  // FL_printChar(10, 10+strlen(str2));
+  
+  bool ok = true;
+  static uint32_t data = 0x42;
+  uint32_t addr = 150;
+  ok = flash.eraseSector(addr);
+  ok = flash.writeULong(addr, data++);
+  delay(20);
+  // uint32_t out = flash.readULong(addr);
 
+  FL_printHex32(addr);
+  uint32_t out = flash.readULong(addr, true);
+  Serial.printf("Sample Text Write: %d %x\n", (uint32_t)out, (uint32_t)out);
+
+
+
+
+  // Flash read/write test
+  // char str[] = "This is a sample string";
+  // addr = 0;
+  // FL_printChar(addr, addr+strlen(str));
+  // ret = 0;
+  // ret = flash.writeCharArray(addr, str, addr+strlen(str), true);
+
+  // Serial.printf("Sample Text Write: %d\n", ret);
+  // FL_printChar(addr, addr+strlen(str));
 
 
   // // Needs one dedicated core to service CPU SPI requests
@@ -517,11 +552,12 @@ void loop() {
   // cmd_rdy = false;
 
   // // // If RX'ed a CPU write command to SB, play music
-  // // if (bring_in_the_olives) {
-  // //   bring_in_the_olives = false;
-  // //   // send_MP3("/meglo.wav");
-  // //   delay(2500);
-  // // }
+  // bring_in_the_olives = true;
+  // if (bring_in_the_olives) {
+  //   bring_in_the_olives = false;
+  //   send_MP3("/meglo.wav");
+  //   delay(2500);
+  // }
 
   delay(500);
   Serial.println("Repeating main loop");
@@ -563,18 +599,9 @@ void loop() {
 // heap_caps_print_heap_info(MALLOC_CAP_SPIRAM);
 
 
-// // Flash read/write test
-// char str2[] = "This is a sample string";
 
-
-// FL_readChar(10, 10+strlen(str2));
 // FL_clear();
 // // delay(5000);
 
-// ret = 0;
 // int i = 0;
-// ret = flash.writeCharArray(10, str2, 10+strlen(str2), true);
-
-// Serial.printf("Sample Text Write: %d\n", ret);
-// FL_readChar(10, 10+strlen(str2));
 // delay(100);

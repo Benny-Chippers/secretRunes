@@ -25,7 +25,7 @@
   #define VSPI_D3 D_RDY     // aka D_RDY
 
   // Pins for Northbridge-Southbridge UART
-  #define UART_TX 23        //  
+  #define UART_TX 22        //  
   #define UART_RX 23        //  
 
   // Pins for Memory Block Connections (main board means Damian's NB/MB)
