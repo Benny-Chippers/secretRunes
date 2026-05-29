@@ -28,6 +28,7 @@
 
 #include "config.h"
 #include "constants.h"
+#include "memory.h"
 
 
 
@@ -212,79 +213,7 @@ size_t send_MP3(const char filepath[]) {
   }
 }
 
-// Timeout is number of seconds to wait (it'll try every 2.5 sec)
-bool init_SD(double timeout) {
-  SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_SD);
-  double elapsed = 0;
-  while (!SD.begin(HSPI_CS_SD, SPI) & (elapsed < timeout)) {  // Tries to connect for 2.5 seconds
-    Serial.println("Error: SD Card mount failed");
-    delay(2500);
-    elapsed += 2.5;
-  }
-  uint8_t sd_type = SD.cardType();
-  if (sd_type == CARD_NONE) {
-    Serial.println("Error: no SD Card attached");
-    return false;
-  }
-  Serial.printf("\nSD Card size: %d\nSectors: %d\nTotal: %d Bytes\nUsed: %d Bytes\n\n", SD.cardSize(), SD.numSectors(), SD.sectorSize(), SD.totalBytes(), SD.usedBytes());
-  return true;
-}
 
-// Wipes entire flash chip. Be cautious about using this function
-bool FL_clear() {
-  if (!flash.eraseChip()) {
-    Serial.println("Error: Couldn't clear Flash Memory");
-    return false;
-  }
-  return true;
-}
-
-uint32_t FL_printHex32(uint32_t start) {
-  uint32_t test = 0;
-  Serial.printf("Reading from flash:\n");
-  ret = 0;
-  // for (uint32_t i = start; i < end; i++) {
-  test = flash.readULong(start, true);
-  Serial.printf("%x", (uint32_t)test);
-  Serial.printf("\nEnd read\n");
-  return test;
-}
-
-void FL_printHex(uint32_t start, uint32_t end) {
-  uint8_t test[end - start + 1] = { 0 };
-  Serial.printf("Reading from flash:\n");
-  ret = 0;
-  ret = flash.readByteArray(start, (uint8_t*)&test, end, true);
-  if (!ret) {
-    Serial.println("Error: Couldn't read flash");
-    return;
-  }
-  for (uint32_t i = start; i < end; i++) {
-    if ((i % (0xFF + 1)) == 0) {
-      Serial.printf("\n0x%x\t", i);
-    }
-    Serial.printf("%x", (char*)test[i]);
-  }
-  Serial.printf("\nEnd read\n");
-}
-
-void FL_printChar(uint32_t start, uint32_t end) {
-  uint8_t test[end - start] = { 0 };
-  Serial.printf("Reading from flash:\n");
-  ret = 0;
-  ret = flash.readByteArray(start, (uint8_t*)&test, (end - start), true);
-  if (!ret) {
-    Serial.println("Error: Couldn't read flash");
-    return;
-  }
-  for (uint32_t i = start; i < end; i++) {
-    if ((i % (0xFF + 1)) == 0) {
-      Serial.printf("\n0x%x\t", i);
-    }
-    Serial.printf("%c", (char*)test[i]);
-  }
-  Serial.printf("\nEnd read\n");
-}
 
 // Struct for interpreting NB-CPU commands
 struct cmd_data {
@@ -432,7 +361,7 @@ void setup() {
   // SPI.setFrequency(FL_FREQ);
   ret = 0;
   uint8_t i = 0;
-  while((ret == 0) && (i++ < 20)) {
+  while((ret == 0) && ((0.25)*(double)i++ < 10)) {
     ret = flash.begin(16*1000*1000);
     delay(250);
     Serial.println("initing flash");
@@ -468,27 +397,28 @@ void loop() {
   bool ok = true;
   static uint32_t data = 0x42;
   uint32_t addr = 150;
-  ok = flash.eraseSector(addr);
-  ok = flash.writeULong(addr, data++);
-  delay(20);
-  // uint32_t out = flash.readULong(addr);
+  // ok = flash.writeULong(addr, data++);
+  // delay(20);
+  // // uint32_t out = flash.readULong(addr);
 
-  FL_printHex32(addr);
-  uint32_t out = flash.readULong(addr, true);
-  Serial.printf("Sample Text Write: %d %x\n", (uint32_t)out, (uint32_t)out);
+  // FL_printHex32(addr);
+  // uint32_t out = flash.readULong(addr, true);
+  // Serial.printf("Sample Text Write: %d %x\n", (uint32_t)out, (uint32_t)out);
 
 
 
 
   // Flash read/write test
-  // char str[] = "This is a sample string";
-  // addr = 0;
-  // FL_printChar(addr, addr+strlen(str));
-  // ret = 0;
-  // ret = flash.writeCharArray(addr, str, addr+strlen(str), true);
+  char str[] = "This is a sample string";
+  addr = 0;
+  
+  ok = flash.eraseSector(addr);
+  FL_printChar(addr, addr+strlen(str));
+  ret = 0;
+  ret = flash.writeCharArray(addr, str, addr+strlen(str), true);
 
-  // Serial.printf("Sample Text Write: %d\n", ret);
-  // FL_printChar(addr, addr+strlen(str));
+  Serial.printf("Sample Text Write: %d\n", ret);
+FL_printChar(addr, addr+strlen(str));
 
 
   // // Needs one dedicated core to service CPU SPI requests
