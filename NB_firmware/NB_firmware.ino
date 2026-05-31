@@ -30,6 +30,15 @@
 #include "constants.h"
 #include "memory.h"
 
+const int NUM_WAV = 6;
+char* wavs[] = {
+  (char*)"/AIC_MitB.wav",
+  (char*)"/KV_HIG.wav",
+  (char*)"/meglo.wav",
+  (char*)"/PB_ShSe.wav",
+  (char*)"/RA_NGGYU.wav",
+  (char*)"/8_bit.wav"
+};
 
 
 SoftwareSerial SBuart(UART_RX, UART_TX);
@@ -343,14 +352,19 @@ uint64_t rec_data = { 0 };
 uint32_t payload = { 0 };
 uint32_t addr = { 0 };
 bool bring_in_the_olives = false;
+bool wrote_flash = false;
 
-
+// Flash Indexing and buffering for writes
+bool secInit = false;           // Has the secBuf been initialized?
+bool secDif = true;            // Is secBuf different from flash chip?
+uint32_t secIdx = (uint32_t)-1;
+uint32_t secBuf[1024] = { 0 };
 
 // Setup initialization
 void setup() {
   Serial.begin(115200);
   randomSeed(time(NULL));
-  delay(2500);
+  // delay(2500);
   SBuart.begin(UART_BAUD);
 
   Serial.println("\nHSPI Init...");
@@ -358,6 +372,7 @@ void setup() {
 
   // Flash initialization
   SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_FL);
+  SPI.setDataMode(SPI_MODE0);
   // SPI.setFrequency(FL_FREQ);
   ret = 0;
   uint8_t i = 0;
@@ -369,17 +384,10 @@ void setup() {
   Serial.printf("Flash Init: %d\tJEDEC ID: 0x%x\t", ret, flash.getJEDECID());
   FL_MAX = flash.getCapacity();
   Serial.printf("%d kB Capacity\n", FL_MAX / 1000);
-  // flash.setClock(FL_FREQ);
-  // while(!FL_clear());
-
-
-  // Serial.print("Flash powerup");
-  // if (flash.powerUp()) Serial.println(" successful");
-  // else Serial.println(" unsuccessful");
 
   // SD initialization
-  double timeout = 10;  // Time to wait on SD card
-  Serial.printf("\nSD Init: %d\n", init_SD(timeout));
+  double timeout = 0;  // Time to wait on SD card
+  // Serial.printf("\nSD Init: %d\n", init_SD(timeout));
 
 //   init_spi(cpu_host, VSPI_CS, true);
 //   if (fencepost) {
@@ -387,38 +395,68 @@ void setup() {
 //     Serial.println("Ready to receive cmd");
 //     create_input_queue(&cmd_rec, 32);
 //   }
+
   Serial.println("\nNorthbridge initialized");
 }
 
 // Main control loop
 void loop() {
-  Serial.println("About to write to flash");
   
-  bool ok = true;
-  static uint32_t data = 0x42;
-  uint32_t addr = 150;
-  // ok = flash.writeULong(addr, data++);
-  // delay(20);
-  // // uint32_t out = flash.readULong(addr);
+  if (!wrote_flash) {
+    // FL_clear();
+    wrote_flash = true;
+    uint32_t addr = 4*50;
+    flash.eraseSector(addr);
+    delay(2500);
+    Serial.println("About to write to flash");
+    
+    FL_printHexWord(addr);
 
-  // FL_printHex32(addr);
-  // uint32_t out = flash.readULong(addr, true);
-  // Serial.printf("Sample Text Write: %d %x\n", (uint32_t)out, (uint32_t)out);
+    // uint32_t data = 0xFFFFFFFF;
+    // FL_writeWord(addr, data, true);
 
+    // uint16_t data2 = 0xDEAD;
+    FL_writeByte(addr, 0x89, 0b011, true);
+    FL_writeByte(addr, 0xAB, 0b100, true);
+
+    delay(2000);
+    FL_writeByte(addr, 0xCD, 0b101, true);
+    FL_writeByte(addr, 0xEF, 0b110, true);
+   
+   
+    delay(2500);
+    FL_readByte(addr, 0b011, true);
+    FL_readByte(addr, 0b100, true);
+    FL_readByte(addr, 0b101, true);
+    FL_readByte(addr, 0b110, true);
+    // FL_printHexWord(addr);
+    FL_flush(false);
+    Serial.println("Done");
+  }
+  // delay(3*1000);
+
+  // for (uint32_t i = 0; i < 100; i++) {
+  //   FL_printHexWord(4*i);
+  // }
+  // for (int i = 0; i < 100; i++) {
+  //   uint32_t addr = 4*i;
+  //   uint32_t data = i;
+  //   FL_writeWord(addr+0x50000, data, true);
+  // }
+  
+  // for (uint32_t i = 200; i < 300; i++) {
+  //   FL_printHexWord(4*i);
+  // }
 
 
 
   // Flash read/write test
-  char str[] = "This is a sample string";
-  addr = 0;
+  // char str[] = "This is a sample string";
+  // addr = 0;
   
-  ok = flash.eraseSector(addr);
-  FL_printChar(addr, addr+strlen(str));
-  ret = 0;
-  ret = flash.writeCharArray(addr, str, addr+strlen(str), true);
-
-  Serial.printf("Sample Text Write: %d\n", ret);
-FL_printChar(addr, addr+strlen(str));
+  // Serial.printf("Sample Text Write: %d\n", ret);
+  // FL_printChar(addr, addr+strlen(str));
+  // FL_printHex(addr, addr+strlen(str));
 
 
   // // Needs one dedicated core to service CPU SPI requests
@@ -489,49 +527,6 @@ FL_printChar(addr, addr+strlen(str));
   //   delay(2500);
   // }
 
-  delay(500);
+  delay(8*1000);
   Serial.println("Repeating main loop");
 }
-
-
-
-// memset(TX_buf, '\0', BUF_SIZE);  // Prepares communication buffers
-// memset(RX_buf, '\0', BUF_SIZE);
-
-// // Initalizing PSRAM (in-progress, not yet working)
-// ps->begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_PS);
-// ret = psram.begin(8000000);
-// PS_MAX = psram.getCapacity();
-// Serial.printf("\nPSRAM Init: %d, cap: %d\n", ret, PS_MAX);
-// psram.setClock(PS_FREQ);
-// char str[] = "This is a sample string";
-// psram.writeCharArray(0, str, strlen(str));
-
-
-// // PSRAM allocation test
-// void* norm = NULL;
-// norm = malloc(10*sizeof(int));
-// Serial.printf("norm: %x\n", (int) norm);
-// free(norm);
-
-// void* ps = NULL;
-// if (!psramInit()) {
-//   Serial.println("Couldn't init psram");
-//   delay(1000);
-// }
-// ps = ps_malloc(10*sizeof(int));
-// Serial.printf("ps: %x\n", (int) ps);
-// free(ps);
-
-// delay(2500)
-// heap_caps_print_heap_info(MALLOC_CAP_8BIT);
-// heap_caps_malloc_extmem_enable(2048);
-// heap_caps_print_heap_info(MALLOC_CAP_SPIRAM);
-
-
-
-// FL_clear();
-// // delay(5000);
-
-// int i = 0;
-// delay(100);

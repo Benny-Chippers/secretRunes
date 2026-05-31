@@ -9,15 +9,9 @@
 #include "config.h"
 
 // Add .wav files here (increment NUM_WAVE when you do)
-#define NUM_WAV 6
-char* wavs[NUM_WAV] = {
-  (char*)"/AIC_MitB.wav",
-  (char*)"/KV_HIG.wav",
-  (char*)"/meglo.wav",
-  (char*)"/PB_ShSe.wav",
-  (char*)"/RA_NGGYU.wav",
-  (char*)"/8_bit.wav"
-};
+// #define NUM_WAV 6
+extern const int NUM_WAV;
+extern char* wavs[];         
 
 
 #define UART_PORT UART_NUM_2
