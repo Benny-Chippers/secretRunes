@@ -44,12 +44,19 @@ char* wavs[] = {
 SoftwareSerial SBuart(UART_RX, UART_TX);
 const uint32_t BUF_SIZE = 64;  // Bytes in tx/rx buffers
 
-// For VSPI Configuration
+// For VSPI (NB-SB) Configuration
 spi_host_device_t cpu_host = SPI3_HOST;
 spi_bus_config_t spi_bus;
 spi_slave_interface_config_t peripheral_config;
 spi_dma_chan_t dma_config = SPI_DMA_DISABLED;
 int msg_idx;
+
+// Variables for CPU-NB SPI communication
+uint64_t cmd_rec = { 0 };
+uint64_t rec_data = { 0 };
+uint32_t payload = { 0 };
+uint32_t addr = { 0 };
+// bool bring_in_the_olives = false;   
 
 // For UART Configuration
 uart_config_t uart_config;
@@ -72,6 +79,12 @@ uint32_t ret;
 bool fencepost = true;
 spi_slave_transaction_t message;  // Transaction struct
 
+// Flash Indexing and buffering for writes
+bool secInit = false;           // Says if the secBuf been initialized
+bool secDif = true;             // Indicates secBuf different from flash chip
+uint32_t secIdx = (uint32_t)-1;
+uint32_t secBuf[1024] = { 0 };
+bool wrote_flash = false;       // Bool for testin (prevents unnecessary rewrites)
 
 
 // Interrupt and interrupt flag cmd_rdy indicate CPU has a command to send using CMD_RDY/VSPI_D2
@@ -222,8 +235,6 @@ size_t send_MP3(const char filepath[]) {
   }
 }
 
-
-
 // Struct for interpreting NB-CPU commands
 struct cmd_data {
   uint8_t dest;
@@ -305,8 +316,8 @@ void wait_for_queue_results() {
 
 // Signals D_RDY so CPU knows we're ready to transmit
 void send_ready() {
-  digitalWrite(VSPI_D3, LOW);
-  digitalWrite(VSPI_D3, HIGH);
+  digitalWrite(D_RDY, LOW);
+  digitalWrite(D_RDY, HIGH);
 }
 
 // Waits until CPU triggers CMD_RDY
@@ -333,7 +344,6 @@ void print_cmd_data(struct cmd_data data) {
   Serial.printf("\twrite: ");
   Serial.print(data.write, BIN);
   Serial.println();
-  // Serial.printf("\tReturning: %x" );
 }
 
 // Clears 64-bit buffer (replacing with 0s)
@@ -341,53 +351,42 @@ void clear_buf(uint64_t* buf) {
   *buf = 0;
 }
 
-// Prints n-bit buffer in hexadecimal
+// Prints n-bit buffer in binary
 void print_buf(uint64_t* buf, int n) {
   for (int j = n-1; j >= 0; j--) Serial.printf("%d",bitRead(*buf, j));
   Serial.printf("\n");
 }
 
-uint64_t cmd_rec = { 0 };
-uint64_t rec_data = { 0 };
-uint32_t payload = { 0 };
-uint32_t addr = { 0 };
-bool bring_in_the_olives = false;
-bool wrote_flash = false;
 
-// Flash Indexing and buffering for writes
-bool secInit = false;           // Has the secBuf been initialized?
-bool secDif = true;            // Is secBuf different from flash chip?
-uint32_t secIdx = (uint32_t)-1;
-uint32_t secBuf[1024] = { 0 };
+// Flash initialization
+bool FL_init(double timeout) {
+  SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_FL);
+  SPI.setDataMode(SPI_MODE0);
+  ret = 0;
+  uint8_t i = 0;
+  while((ret == 0) && ((0.25)*(double)i++ < timeout)) {
+    ret = flash.begin(16*1000*1000);
+    delay(250);
+    Serial.println("Trying to init...");
+  }
+  Serial.printf("Flash Init: %d\tJEDEC ID: 0x%x\t", ret, flash.getJEDECID());
+  FL_MAX = flash.getCapacity();
+  Serial.printf("%d kB Capacity\n", FL_MAX / 1000);
+  return ret;
+}
 
 // Setup initialization
 void setup() {
   Serial.begin(115200);
   randomSeed(time(NULL));
-  // delay(2500);
   SBuart.begin(UART_BAUD);
-
   Serial.println("\nHSPI Init...");
 
-
-  // Flash initialization
-  SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_FL);
-  SPI.setDataMode(SPI_MODE0);
-  // SPI.setFrequency(FL_FREQ);
-  ret = 0;
-  uint8_t i = 0;
-  while((ret == 0) && ((0.25)*(double)i++ < 10)) {
-    ret = flash.begin(16*1000*1000);
-    delay(250);
-    Serial.println("initing flash");
-  }
-  Serial.printf("Flash Init: %d\tJEDEC ID: 0x%x\t", ret, flash.getJEDECID());
-  FL_MAX = flash.getCapacity();
-  Serial.printf("%d kB Capacity\n", FL_MAX / 1000);
+  FL_init(10);
 
   // SD initialization
-  double timeout = 0;  // Time to wait on SD card
-  // Serial.printf("\nSD Init: %d\n", init_SD(timeout));
+  double timeout = 5;  // Time to wait on SD card
+  Serial.printf("\nSD Init: %d\n", init_SD(timeout));
 
 //   init_spi(cpu_host, VSPI_CS, true);
 //   if (fencepost) {
@@ -412,25 +411,20 @@ void loop() {
     
     FL_printHexWord(addr);
 
-    // uint32_t data = 0xFFFFFFFF;
-    // FL_writeWord(addr, data, true);
-
     // uint16_t data2 = 0xDEAD;
     FL_writeByte(addr, 0x89, 0b011, true);
     FL_writeByte(addr, 0xAB, 0b100, true);
-
-    delay(2000);
     FL_writeByte(addr, 0xCD, 0b101, true);
     FL_writeByte(addr, 0xEF, 0b110, true);
    
-   
+    // delay(2000);
     delay(2500);
     FL_readByte(addr, 0b011, true);
     FL_readByte(addr, 0b100, true);
     FL_readByte(addr, 0b101, true);
     FL_readByte(addr, 0b110, true);
     // FL_printHexWord(addr);
-    FL_flush(false);
+    // FL_flush(false);
     Serial.println("Done");
   }
   // delay(3*1000);

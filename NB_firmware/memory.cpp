@@ -57,9 +57,6 @@ bool FL_clear() {
   return true;
 }
 
-
-
-
 // Prints one word in hex values
 uint32_t FL_printHexWord(uint32_t addr) {
   if (addr % 4 ) {            // Ensures addr is word-aligned
@@ -121,11 +118,8 @@ bool FL_flush(bool debug) {
   uint32_t attempt2 = 0;
   while (!ok2 && (attempt2++ < (uint32_t)-1)) {
     ok2 = flash.eraseSector(secIdx);
-    delay(50);
+    delay(5);
   }
-
-  // flash.status();
-  // delay(2.5*1000);
   if (debug) Serial.println("Flushed");
   for (uint32_t i = 0; i < 1024; i++) {
     bool ok = false;
@@ -144,12 +138,6 @@ bool FL_flush(bool debug) {
   if (debug) Serial.println();
   secDif = false;
   return true;
-  // flash.writeByteArray(secIdx, (uint8_t*)secBuf, 4096);
-  // for (uint32_t i = 0; i < 1024; i++) {
-  //   bool ok = flash.writeULong(secIdx + 4*i, secBuf[i], true);
-  //   if (!ok) Serial.printf("Flush couldn't write to 0x%x: 0x%x\n", secIdx+4*i, secBuf[i]);
-  // }
-
 }
 
 
