@@ -58,6 +58,6 @@ extern spi_slave_transaction_t message;  // Transaction struct
 extern bool secInit;
 extern bool secDif;
 extern uint32_t secIdx;
-extern uint32_t secBuf[4096];
+extern uint32_t secBuf[1024];
 
 #endif

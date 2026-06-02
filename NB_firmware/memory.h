@@ -8,7 +8,7 @@
 // Flash I/O Functions
 bool      FL_clear();
 uint32_t  FL_printHexWord(uint32_t addr);
-bool      FL_flush(bool debug);
+bool      FL_flush(uint32_t newSecIdx, bool debug);
 bool      FL_writeWord(const uint32_t addr, uint32_t data, bool debug);
 uint32_t  FL_readWord(uint32_t addr, bool debug);
 bool      FL_writeShort(uint32_t addr, uint16_t data, uint8_t position, bool debug);

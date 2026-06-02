@@ -82,8 +82,8 @@ spi_slave_transaction_t message;  // Transaction struct
 // Flash Indexing and buffering for writes
 bool secInit = false;           // Says if the secBuf been initialized
 bool secDif = true;             // Indicates secBuf different from flash chip
-uint32_t secIdx = (uint32_t)-1;
-uint32_t secBuf[1024] = { 0 };
+uint32_t secIdx = 0;
+uint32_t secBuf[1024] = {(uint32_t) -1 };
 bool wrote_flash = false;       // Bool for testin (prevents unnecessary rewrites)
 
 
@@ -372,6 +372,12 @@ bool FL_init(double timeout) {
   Serial.printf("Flash Init: %d\tJEDEC ID: 0x%x\t", ret, flash.getJEDECID());
   FL_MAX = flash.getCapacity();
   Serial.printf("%d kB Capacity\n", FL_MAX / 1000);
+
+
+  for (uint32_t i = 0; i < 1024; i++) {
+    secBuf[i] = (uint32_t)-1;
+  }
+  secInit = false;
   return ret;
 }
 
@@ -401,46 +407,41 @@ void setup() {
 // Main control loop
 void loop() {
   
-  if (!wrote_flash) {
-    // FL_clear();
-    wrote_flash = true;
-    uint32_t addr = 4*50;
-    flash.eraseSector(addr);
-    delay(2500);
-    Serial.println("About to write to flash");
-    
-    FL_printHexWord(addr);
 
-    // uint16_t data2 = 0xDEAD;
-    FL_writeByte(addr, 0x89, 0b011, true);
-    FL_writeByte(addr, 0xAB, 0b100, true);
-    FL_writeByte(addr, 0xCD, 0b101, true);
-    FL_writeByte(addr, 0xEF, 0b110, true);
-   
-    // delay(2000);
-    delay(2500);
-    FL_readByte(addr, 0b011, true);
-    FL_readByte(addr, 0b100, true);
-    FL_readByte(addr, 0b101, true);
-    FL_readByte(addr, 0b110, true);
-    // FL_printHexWord(addr);
-    // FL_flush(false);
-    Serial.println("Done");
-  }
-  // delay(3*1000);
-
-  // for (uint32_t i = 0; i < 100; i++) {
-  //   FL_printHexWord(4*i);
-  // }
-  // for (int i = 0; i < 100; i++) {
-  //   uint32_t addr = 4*i;
-  //   uint32_t data = i;
-  //   FL_writeWord(addr+0x50000, data, true);
-  // }
+  // if (!wrote_flash) {
+  //   FL_clear();
+  //   wrote_flash = true;
+  //   for (uint32_t i = 0; i < 100; i++) {
+  //     FL_printHexWord(4*i);
+  //   }
+  //   for (int i = 0; i < 100; i++) {
+  //     uint32_t addr = 4*i;
+  //     uint32_t data = i;
+  //     FL_writeWord(addr, data, true);
+  //   }
   
-  // for (uint32_t i = 200; i < 300; i++) {
-  //   FL_printHexWord(4*i);
+  // //   // flash.eraseSector(addr);
+  // //   delay(2500);
+  // //   Serial.println("About to write to flash");
+    
+  // //   // FL_printHexWord(addr);
+
+  // //   // uint16_t data2 = 0xDEAD;
+  // //   FL_writeWord(addr, 0x89ABCDEF, true);
+  // //   // FL_printHexWord(addr);
+   
+  // //   delay(2500);
+
+  // //   // FL_writeWord(addr2, 0xDEADBEEF, true);
+  // //   // FL_printHexWord(addr2);
+
+  // //   Serial.println("Done");
   // }
+
+  for (uint32_t i = 0; i < 100; i++) {
+      FL_printHexWord(4*i);
+    }
+
 
 
 

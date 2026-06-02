@@ -63,11 +63,9 @@ uint32_t FL_printHexWord(uint32_t addr) {
     return 0;
   }
   uint32_t data = -1;
-  Serial.printf("FL:\t");
   ret = 0;
   data = FL_readWord(addr, false);
-  Serial.printf("0x%x:\t0x%x", addr, data);
-  Serial.printf("\n");
+  Serial.printf("FL:\t0x%x:\t0x%x\n", addr, data);
   return data;
 }
 
@@ -110,32 +108,43 @@ void FL_printChar(uint32_t start, uint32_t end) {
 }
 
 // Erases sector, then write buffer to said sector
-bool FL_flush(bool debug) {
+bool FL_flush(uint32_t newSecIdx, bool debug) {
   if (!secInit || !secDif) return true;
-  if (debug) Serial.printf("Erase sector 0x%x\n", secIdx);
-  // Ensures data is zeroed out before use
+  // Ensures data is zeroed out before writing buffer
   bool ok2 = false;
   uint32_t attempt2 = 0;
   while (!ok2 && (attempt2++ < (uint32_t)-1)) {
     ok2 = flash.eraseSector(secIdx);
     delay(5);
   }
-  if (debug) Serial.println("Flushed");
+  if (debug) Serial.printf("Flush needs to rewrite sector 0x%x\n", secIdx);
   for (uint32_t i = 0; i < 1024; i++) {
-    bool ok = false;
-    uint32_t attempt = 0;
-    while (!ok && (attempt++ < (uint32_t)-1)) {
-      ok = flash.writeULong(secIdx+4*i, secBuf[i], false);
-      delay(5);
-    }
-    if (!ok) {
-      Serial.printf("Write failed at 0x%x\n", secIdx+i);
-      return false;
-    }
-    delay(2);
-    if (debug) Serial.print(".");
+    flash.writeULong(secIdx + 4*i, secBuf[i]);
   }
-  if (debug) Serial.println();
+  if (debug) Serial.println("Flushed");
+
+  secIdx = newSecIdx;
+  for (uint32_t i = 0; i < 1024; i++) {
+    secBuf[i] = flash.readULong(secIdx + 4*i);
+  }
+
+
+  // if (debug) Serial.printf("Erase sector 0x%x\n", secIdx);
+  // for (uint32_t i = 0; i < 1024; i++) {
+  //   bool ok = false;
+  //   uint32_t attempt = 0;
+  //   while (!ok && (attempt++ < (uint32_t)-1)) {
+  //     ok = flash.writeULong(secIdx+4*i, secBuf[i], false);
+  //     delay(5);
+  //   }
+  //   if (!ok) {
+  //     Serial.printf("Write failed at 0x%x\n", secIdx+4*i);
+  //     return false;
+  //   }
+  //   delay(2);
+  //   if (debug) Serial.print(".");
+  // }
+  // if (debug) Serial.println();
   secDif = false;
   return true;
 }
@@ -150,9 +159,9 @@ bool FL_writeWord(const uint32_t addr, uint32_t data, bool debug) {
   if (addr % 4 ) {            // Ensures addr is word-aligned
     return false;
   }
-  uint32_t newSecIdx = addr & ~(0xFFF);   // Sector addr removes lowest 12 bits
+  uint32_t newSecIdx = (addr & ~(0xFFF));   // Sector addr removes lowest 12 bits
   if (newSecIdx != secIdx) {              // Doing writes on a different sector
-    if (!secInit || secDif) FL_flush(debug);         // Writes buffered changes
+    FL_flush(newSecIdx, debug);         // Writes buffered changes
     secInit = true;
     secIdx = newSecIdx; 
     for (uint32_t i = 0; i < 1024; i++) {// Fills buffer with new sector
@@ -167,21 +176,31 @@ bool FL_writeWord(const uint32_t addr, uint32_t data, bool debug) {
 
 
 uint32_t FL_readWord(uint32_t addr, bool debug) {
-  if (addr % 4 ) {            // Ensures addr is word-aligned
+  if (addr % 4 ) {            // Ensures addr is word-aligned (returning null if not)
     return (uint32_t)-1;
   }
-  // if (secDif) FL_flush(debug); 
-  uint64_t attempts = 0;
-  uint32_t data = -1;
-  uint32_t newdata = 1;
-  // bool ok = false;
-  while (attempts++ < (uint64_t)-1) {
-    newdata = flash.readULong(addr);
-    if (data == newdata) {
-      break;
-    }
-    data = newdata;
+  if (secInit && ((addr & ~0xFFF) == secIdx)) {
+    FL_flush(addr & ~0xFFF, debug);
+    if (debug) Serial.printf("FL at 0x%x: 0x%x\n", addr, secBuf[(addr & 0xFFF) >> 2]);
+    return secBuf[(addr & (0xFFF)) >> 2];
   }
+  FL_flush((addr & ~0xFFF), false);
+
+  for (uint32_t i = 0; i < 1024; i++) {
+    secBuf[i] = flash.readULong((secIdx) + 4*i);
+  }
+  secInit = true;
+  uint32_t data = secBuf[(addr & 0xFFF) >> 2];
+  // uint64_t attempts = 0;
+  // uint32_t newdata = 1;
+  // // bool ok = false;
+  // while (attempts++ < (uint64_t)-1) {
+  //   newdata = flash.readULong(addr);
+  //   if (data == newdata) {
+  //     break;
+  //   }
+  //   data = newdata;
+  // }
   
   if (debug) Serial.printf("FL at 0x%x: 0x%x\n", addr, data);
   return data;
@@ -206,7 +225,7 @@ bool FL_writeShort(uint32_t addr, uint16_t data, uint8_t position, bool debug) {
   secBuf[(addr & 0xFFF) >> 2] = oldData;
   secDif = true;
   while (!FL_writeWord(addr, oldData, debug));
-  FL_flush(false);
+  FL_flush(addr & ~0xFFF, false);
 
   return true;
 }
@@ -251,7 +270,7 @@ bool FL_writeByte(uint32_t addr, uint8_t data, uint8_t position, bool debug) {
   secBuf[(addr & 0xFFF) >> 2] = oldData;
   secDif = true;
   while (!FL_writeWord(addr, oldData, debug));
-  FL_flush(false);
+  FL_flush(addr & ~0xFFF, false);
 
   return true;
 }
