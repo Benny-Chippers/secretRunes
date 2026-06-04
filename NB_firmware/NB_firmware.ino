@@ -221,6 +221,7 @@ void wait_for_queue_results() {
 // Signals D_RDY so CPU knows we're ready to transmit
 void send_ready() {
   digitalWrite(D_RDY, LOW);
+  vTaskDelay(1);
   digitalWrite(D_RDY, HIGH);
 }
 
@@ -348,7 +349,7 @@ void loop() {
 
     Serial.print("\ncmd line: 0b");
     // cmd_rec &= 0xFF;
-    for (int i = 7; i >= 0; i--) Serial.printf("%d", 1 && (cmd_rec & (1 << i)));
+    for (int i = 31; i >= 0; i--) Serial.printf("%d", 1 && (cmd_rec & (1 << i)));
     Serial.println();
 
     struct cmd_data cmd = parse_cmd(cmd_rec, true);
@@ -360,6 +361,7 @@ void loop() {
     } else {                              // Reads cmd just needs addr
       create_input_queue(&rec_data, 32);
     }
+    cmd_rdy = false;
     send_ready();
 
     Serial.println("Waiting for addr");
@@ -393,6 +395,7 @@ void loop() {
 
           break;
         case SD_CARD:
+          Serial.println("The SD read totally works...");
 
           break;
         case SB:      // May be unused
@@ -423,6 +426,7 @@ void loop() {
 
           break;
         case SD_CARD:
+          Serial.println("The SD write totally works...");
 
           break;
         case SB:      // Triggers NB-CPU music transfer
@@ -462,6 +466,9 @@ void loop() {
 
     rec_data = 0xABCDEF01;
     create_output_queue(&rec_data, 32);
+    cmd_rdy = false;
+    send_ready();
+    while (!cmd_rdy) vTaskDelay(1);
     wait_for_queue_results();
     Serial.println("Sent R/W-Status data to CPU (just testing atm)");
 
@@ -477,7 +484,9 @@ void loop() {
   //   send_MP3("/meglo.wav");
   //   delay(2500);
   // }
+  // clear_buf(&cmd_rec);
+  // create_input_queue(&cmd_rec, 32);
 
-  delay(1000);
+  // delay(1000);
   Serial.println("Repeating main loop");
 }

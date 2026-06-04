@@ -111,8 +111,8 @@ bool cpu_send_cmd(uint8_t cmd, uint32_t addr_i, uint32_t payload, bool debug) {
   memset(&message, 0, sizeof(message));
   // uint8_t cmd_addr = cmd;
 
-  static uint32_t buf = cmd;
-  static uint64_t addr = ((uint64_t)payload<<32) | addr_i;
+  uint32_t buf = cmd;
+  uint64_t addr = ((uint64_t)payload<<32) | addr_i;
   
 
   message.flags = 0; //SPI_TRANS_USE_TXDATA
@@ -152,6 +152,17 @@ bool cpu_send_cmd(uint8_t cmd, uint32_t addr_i, uint32_t payload, bool debug) {
     message.length = 32;
   }
   
+    d_rdy = false;
+    while(d_rdy == false) {
+      vTaskDelay(1);
+      uint64_t i = 0;
+      if (i++ > 1000) {
+        Serial.println("Waiting for second D_RDY");
+        send_ready();
+        i = 0;
+      }
+    }
+
   message.tx_buffer = (void*) &addr;
   message.rx_buffer = (void*) NULL;
   message.user = (void*) 1;
@@ -189,6 +200,7 @@ bool cpu_send_cmd(uint8_t cmd, uint32_t addr_i, uint32_t payload, bool debug) {
 // Signals CMD_RDY so NB knows we're ready to transmit
 void send_ready() {
   digitalWrite(VSPI_D2, LOW);
+  vTaskDelay(1);
   digitalWrite(VSPI_D2, HIGH);
 }
 
@@ -202,7 +214,7 @@ void loop() {
   } else {
     str_idx = 0;
   }
-  cpu_send_cmd(0b00011111, 4*0x100, payload, true);
+  cpu_send_cmd(0b00011111, 4*0x100, 0x12345678, true);
 
   // Serial.printf("Sending cmd & addr: %d\n", cpu_send_cmd(0b00011111, 4*0x100, payload, true));
   
@@ -224,7 +236,7 @@ void loop() {
 
   if (d_rdy) {
     Serial.println("Getting second D_RDY trigger");
-    static uint32_t buf = 0;
+    uint32_t buf = 0;
     memset(&buf, 0, sizeof(buf));
 
     spi_transaction_t message;
@@ -249,6 +261,6 @@ void loop() {
     Serial.printf("SPI NB: 0x%x\n", buf);
     d_rdy = false;
   }
-  delay(250);
+  // delay(250);
   Serial.println("Weeee");
 }
