@@ -23,7 +23,7 @@
 
 
 
-// extern SoftwareSerial SBuart(UART_RX, UART_TX);
+extern SoftwareSerial SBuart;
 extern const uint32_t BUF_SIZE = 64;  // Bytes in tx/rx buffers
 
 // For VSPI Configuration

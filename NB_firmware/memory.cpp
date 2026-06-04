@@ -29,11 +29,12 @@ extern SPIFlash flash;
 extern SPIFlash psram;  // Not yet working
 
 
-
 // Timeout is number of seconds to wait (it'll try every 2.5 sec)
-bool init_SD(double timeout) {
+bool SD_init(double timeout) {
   SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_SD);
   double elapsed = 0;
+  Serial.printf("SD Initing...\n");
+
   while (!SD.begin(HSPI_CS_SD, SPI) & (elapsed < timeout)) {  // Tries to connect for 2.5 seconds
     Serial.println("Error: SD Card mount failed");
     delay(2500);
@@ -47,6 +48,96 @@ bool init_SD(double timeout) {
   Serial.printf("\nSD Card size: %d\nSectors: %d\nTotal: %d Bytes\nUsed: %d Bytes\n\n", SD.cardSize(), SD.numSectors(), SD.sectorSize(), SD.totalBytes(), SD.usedBytes());
   return true;
 }
+
+// Gets SD card size
+size_t get_SD_size(const char filepath[]) {
+  if (SD.exists(filepath)) {
+    File f = SD.open(filepath);
+    size_t size = f.size();
+    return size;
+  } else {
+    Serial.printf("Error: %s doesn't exist\n", filepath);
+    return 0;
+  }
+}
+
+// Reads data from given SD card file to SB using UART. Note: buffer is passed by reference,
+// and must be instantiated with the required file's size before calling this function
+// Note: UART bottlenecked old setup from being able to use UART for continuous music transmission
+size_t read_SD_to_SB(const char filepath[], size_t size, uint8_t* buf) {
+  if (SD.exists(filepath)) {
+    File f = SD.open(filepath);
+    size_t sent = 0;
+    bool hit_data = false;
+    while (f.available()) {
+      // Add compression after data header 'd''a''t''a'
+      //  (aside from header, drop two bytes every other two bytes)
+      for (size_t i = 0; i < TRAN_SIZE; i++) {
+        if (f.available()) {
+          buf[i] = f.read();
+          // SBuart.print((char)buf[i]);
+          // Serial.printf("%x", buf[i]);
+          sent++;
+        } else {
+          buf[i] = 0;
+        }
+      }
+      SBuart.write(buf, TRAN_SIZE);  // Untested but want to sent a whole transaction at once
+
+      //Sends buffer over UART...
+      // Serial.println((char*)   buf);
+      // for (int i = 0; i < TRAN_SIZE; i++) {
+      //   Serial.print((char)buf[i]); // for debugging
+      //   Serial.print(",");
+      // }
+      // Serial.println("");
+    }
+    f.close();
+    Serial.println("exiting read_SD2buf");
+    return sent;
+  } else {
+    Serial.printf("Error: %s doesn't exist\n", filepath);
+    return 0;
+  }
+}
+
+// Reads an ~~mp3~~ (currently only WAV) file to a byte steam, then sends it to the Southbridge via UART.
+// Buffer will be internally created and is deleted before the end of the function
+// Will return status: 0 is failure, otherwise number of bytes sent
+size_t send_MP3(const char filepath[]) {
+  Serial.println("sodjfoj");
+  if (SD.exists(filepath)) {
+    size_t size = get_SD_size(filepath);  // Opens file
+    size_t sent = 0;
+    Serial.printf("File %s is: ", filepath);
+    Serial.print(size);
+    Serial.print(" bytes. Need ");
+    Serial.print(size / TRAN_SIZE);
+    Serial.println(" transmissions");
+
+    while (sent < size) {   // Note: this may not need to be a loop
+      uint8_t* buf = NULL;  // Allocates buffer
+      buf = (uint8_t*)heap_caps_malloc(TRAN_SIZE + 1, MALLOC_CAP_8BIT);
+      if (NULL == buf) {
+        Serial.println("failed to make buffer");
+        return 0;
+      }
+      memset(buf, '\0', TRAN_SIZE + 1);
+      sent += read_SD_to_SB(filepath, size, (uint8_t*)buf);  // Reads file to buffer
+      Serial.println("");
+      heap_caps_free((void*)buf);
+    }
+
+    Serial.println("sent mp3");
+
+    return size;
+  } else {
+    Serial.printf("Error: %s not found\n", filepath);
+    return 0;
+  }
+}
+
+
 
 // Wipes entire flash chip. Be cautious about using this function
 bool FL_clear() {
@@ -156,6 +247,7 @@ bool FL_flush(uint32_t newSecIdx, bool debug) {
 // In order to allow word-level writes, we will need to see if we have to
 // erase the whole sector and if so, rewrite all but the new word
 bool FL_writeWord(const uint32_t addr, uint32_t data, bool debug) {
+  Serial.printf("FL_writeWord: addr 0x%08x\tdata 0x%08x\n", addr, data);
   if (addr % 4 ) {            // Ensures addr is word-aligned
     return false;
   }
@@ -170,6 +262,7 @@ bool FL_writeWord(const uint32_t addr, uint32_t data, bool debug) {
   }
   secBuf[(addr & 0xFFF) >> 2] = data;
 
+  Serial.println("Reaching end");  
   secDif = true;
   return true;
 }

@@ -56,6 +56,10 @@ uint64_t cmd_rec = { 0 };
 uint64_t rec_data = { 0 };
 uint32_t payload = { 0 };
 uint32_t addr = { 0 };
+#define  SRL_MAX 1024
+char     srl_buf[1025] = { '\0' };
+uint32_t srl_idx = 0;
+
 // bool bring_in_the_olives = false;   
 
 // For UART Configuration
@@ -63,12 +67,12 @@ uart_config_t uart_config;
 QueueHandle_t uart_queue;
 
 // For HSPI Configuration
-spi_host_device_t sd_host = SPI1_HOST;
-spi_bus_config_t sd_bus;
-sdmmc_host_t sd_cfg = SDSPI_HOST_DEFAULT();
+spi_host_device_t     sd_host = SPI1_HOST;
+spi_bus_config_t      sd_bus;
+sdmmc_host_t          sd_cfg = SDSPI_HOST_DEFAULT();
 sdspi_device_config_t sd;
-sdspi_dev_handle_t sd_handle;
-spi_bus_config_t bus_cfg;
+sdspi_dev_handle_t    sd_handle;
+spi_bus_config_t      bus_cfg;
 SPIClass hspi(HSPI);
 SPIFlash flash(HSPI_CS_FL);
 SPIFlash psram(HSPI_CS_PS);  // Not yet working
@@ -147,94 +151,6 @@ void read_SD(const char filepath[]) {
   }
 }
 
-// Gets SD card size
-size_t get_SD_size(const char filepath[]) {
-  if (SD.exists(filepath)) {
-    File f = SD.open(filepath);
-    size_t size = f.size();
-    return size;
-  } else {
-    Serial.printf("Error: %s doesn't exist\n", filepath);
-    return 0;
-  }
-}
-
-// Reads data from given SD card file to SB using UART. Note: buffer is passed by reference,
-// and must be instantiated with the required file's size before calling this function
-// Note: UART bottlenecked old setup from being able to use UART for continuous music transmission
-size_t read_SD_to_SB(const char filepath[], size_t size, uint8_t* buf) {
-  if (SD.exists(filepath)) {
-    File f = SD.open(filepath);
-    size_t sent = 0;
-    bool hit_data = false;
-    while (f.available()) {
-      // Add compression after data header 'd''a''t''a'
-      //  (aside from header, drop two bytes every other two bytes)
-      for (size_t i = 0; i < TRAN_SIZE; i++) {
-        if (f.available()) {
-          buf[i] = f.read();
-          // SBuart.print((char)buf[i]);
-          // Serial.printf("%x", buf[i]);
-          sent++;
-        } else {
-          buf[i] = 0;
-        }
-      }
-      SBuart.write(buf, TRAN_SIZE);  // Untested but want to sent a whole transaction at once
-
-      //Sends buffer over UART...
-      // Serial.println((char*)   buf);
-      // for (int i = 0; i < TRAN_SIZE; i++) {
-      //   Serial.print((char)buf[i]); // for debugging
-      //   Serial.print(",");
-      // }
-      // Serial.println("");
-    }
-    f.close();
-    Serial.println("exiting read_SD2buf");
-    return sent;
-  } else {
-    Serial.printf("Error: %s doesn't exist\n", filepath);
-    return 0;
-  }
-}
-
-// Reads an ~~mp3~~ (currently only WAV) file to a byte steam, then sends it to the Southbridge via UART.
-// Buffer will be internally created and is deleted before the end of the function
-// Will return status: 0 is failure, otherwise number of bytes sent
-size_t send_MP3(const char filepath[]) {
-  Serial.println("sodjfoj");
-  if (SD.exists(filepath)) {
-    size_t size = get_SD_size(filepath);  // Opens file
-    size_t sent = 0;
-    Serial.printf("File %s is: ", filepath);
-    Serial.print(size);
-    Serial.print(" bytes. Need ");
-    Serial.print(size / TRAN_SIZE);
-    Serial.println(" transmissions");
-
-    while (sent < size) {   // Note: this may not need to be a loop
-      uint8_t* buf = NULL;  // Allocates buffer
-      buf = (uint8_t*)heap_caps_malloc(TRAN_SIZE + 1, MALLOC_CAP_8BIT);
-      if (NULL == buf) {
-        Serial.println("failed to make buffer");
-        return 0;
-      }
-      memset(buf, '\0', TRAN_SIZE + 1);
-      sent += read_SD_to_SB(filepath, size, (uint8_t*)buf);  // Reads file to buffer
-      Serial.println("");
-      heap_caps_free((void*)buf);
-    }
-
-    Serial.println("sent mp3");
-
-    return size;
-  } else {
-    Serial.printf("Error: %s not found\n", filepath);
-    return 0;
-  }
-}
-
 // Struct for interpreting NB-CPU commands
 struct cmd_data {
   uint8_t dest;
@@ -246,31 +162,19 @@ struct cmd_data {
 struct cmd_data parse_cmd(uint8_t cmd, bool debug) {
   struct cmd_data ret;
   // Gets destination (0 is PSRAM, 1 is Flash, 2 is SD Card, 3 is Southbridge)
-  uint8_t dest = (cmd & 0b11000000);
-  dest = dest >> 6;
+  uint8_t dest = (cmd & 0b01110000);
+  dest = dest >> 4;
   // Gets request size (0 is whole word, 1 is first half, 2 is second half, 3-6 are bytes 1-4)
-  uint8_t size = (cmd & 0b00111100);
-  size = size >> 2;
+  uint8_t size = (cmd & 0b00001110);
+  size = size >> 1;
   // Gets if it's a read or write request ()
-  bool write = (cmd & 0b00000011);
+  bool write = (cmd & 0b00000001);
   ret.dest = dest;
   ret.size = size;
   ret.write = write;
 
-  if (debug) {
-    // Serial.printf("dest: %d\tsize: %d\twrite:%d"\n", ret);
-    // Serial.printf("dest: %d\tsize: %d\twrite:%d\n", dest, size, write);
-    Serial.printf("dest: 0b");
-    for (int i = 1; i >= 0; i--) Serial.printf("%d", 1 && (ret.dest & (1 << i)));
-    Serial.printf("\tsize: 0b");
-    for (int i = 3; i >= 0; i--) Serial.printf("%d", 1 && (ret.size & (1 << i)));
-    // Serial.print(ret.size, BIN);
-    Serial.printf("\twrite: 0b");
-    for (int i = 1; i >= 0; i--) Serial.printf("%d", 1 && (ret.write & (1 << i)));
+  if (debug) print_cmd_data(ret);
   
-    // Serial.print(ret.write, BIN);
-    Serial.println();
-  }
   return ret;
 }
 
@@ -337,13 +241,7 @@ void get_ready() {
 
 // Consider deleting: same functionality with debug = true
 void print_cmd_data(struct cmd_data data) {
-  Serial.printf("dest: ");
-  Serial.print(data.dest, BIN);
-  Serial.printf("\tsize: ");
-  Serial.print(data.size, BIN);
-  Serial.printf("\twrite: ");
-  Serial.print(data.write, BIN);
-  Serial.println();
+  Serial.printf("dest: 0x%x\tsize: 0x%x\twrite: %d\n", data.dest, data.size, data.write);
 }
 
 // Clears 64-bit buffer (replacing with 0s)
@@ -390,16 +288,14 @@ void setup() {
 
   FL_init(10);
 
-  // SD initialization
-  double timeout = 5;  // Time to wait on SD card
-  Serial.printf("\nSD Init: %d\n", init_SD(timeout));
+  Serial.printf("\nSD Init: %d\n", SD_init(0));
 
-//   init_spi(cpu_host, VSPI_CS, true);
-//   if (fencepost) {
-//     fencepost = false;
-//     Serial.println("Ready to receive cmd");
-//     create_input_queue(&cmd_rec, 32);
-//   }
+  init_spi(cpu_host, VSPI_CS, true);
+  if (fencepost) {
+    fencepost = false;
+    Serial.println("Ready to receive cmd");
+    create_input_queue(&cmd_rec, 32);
+  }
 
   Serial.println("\nNorthbridge initialized");
 }
@@ -438,83 +334,143 @@ void loop() {
   // //   Serial.println("Done");
   // }
 
-  for (uint32_t i = 0; i < 100; i++) {
-      FL_printHexWord(4*i);
+  // for (uint32_t i = 0; i < 100; i++) {
+  //     FL_printHexWord(4*i);
+  // }
+
+  // Needs one dedicated core to service CPU SPI requests
+  if (cmd_rdy) {
+    cmd_rdy = false;
+    send_ready();
+    uint64_t i = 0;
+    get_ready();
+    wait_for_queue_results();  // Makes sure cmd is received
+
+    Serial.print("\ncmd line: 0b");
+    // cmd_rec &= 0xFF;
+    for (int i = 7; i >= 0; i--) Serial.printf("%d", 1 && (cmd_rec & (1 << i)));
+    Serial.println();
+
+    struct cmd_data cmd = parse_cmd(cmd_rec, true);
+    clear_buf(&cmd_rec);
+    clear_buf(&rec_data);
+
+    if (cmd.write) {                      // Write cmd needs addr & write payload
+      create_input_queue(&rec_data, 64);
+    } else {                              // Reads cmd just needs addr
+      create_input_queue(&rec_data, 32);
+    }
+    send_ready();
+
+    Serial.println("Waiting for addr");
+    while (!cmd_rdy) vTaskDelay(100);
+    wait_for_queue_results();
+    payload = 0;
+    addr = (uint32_t)(rec_data & 0xFFFFFFFF);
+    // if (cmd.write) {
+      // payload = (uint32_t) (rec_data >> 32);
+      // Serial.printf("addr: 0x%08x\t", addr);
+      // Serial.printf("data: 0x%08x\n", payload);
+    // } else {
+      // print_buf((uint64_t*) &addr, 32);
+      // Serial.printf("addr: 0x%08x\n", addr);
+    // }
+
+    if (!cmd.write) {                 // write == 0 means reading
+      Serial.println("Read command");
+      Serial.printf("addr: 0x%08x\n", addr);
+
+      // Implement read...
+      switch(cmd.dest) {
+        case PSRAM:
+          Serial.println("The PSRAM read totally works...");
+          break;
+        case FLASH:
+          Serial.println("The Flash read totally works...");
+          payload = FL_readWord(addr, true);
+
+          Serial.printf("flash read: 0x%08x\n", payload);
+
+          break;
+        case SD_CARD:
+
+          break;
+        case SB:      // May be unused
+          break;
+        case CPU_S:
+        default:
+          Serial.println();
+          break;
+      }
+
+      // Send back data...
+    } else {
+      Serial.println("Write command");
+      // Add control flow so only SB-targetted writes trigger send_MP3
+      payload = (uint32_t) (rec_data >> 32);
+      Serial.printf("addr: 0x%08x\t", addr);
+      Serial.printf("data: 0x%08x\n", payload);
+      
+      // bring_in_the_olives = true;
+      uint32_t w_status = 0;
+      switch(cmd.dest) {
+        case PSRAM:
+          Serial.println("The PSRAM write totally works...");
+          break;
+        case FLASH:
+          Serial.println("The Flash write totally works...");
+          FL_writeWord(addr, payload, true);
+
+          break;
+        case SD_CARD:
+
+          break;
+        case SB:      // Triggers NB-CPU music transfer
+          break;
+        case CPU_S:
+        default:
+          // char str[] = ;
+          for (uint32_t i = 0; i < 4; i++) {
+            uint32_t byte = (payload & 0xFF<<8*i)>>8*i;
+            srl_buf[srl_idx++] = byte;
+          }
+          Serial.println("Added CPU serial output to buffer");
+          bool endFound = false;
+          for (uint32_t i = 0; i < SRL_MAX; i++) {
+            if (srl_buf[i] == '\n') {
+              endFound = true;
+            }
+          }
+          Serial.printf("CPU says: 0x%s", srl_buf);
+          if (endFound) {
+            memset(srl_buf, '\0', SRL_MAX);
+            srl_idx = 0;
+          }
+          
+          break;
+      }
+      // Send write-status back to CPU
+
+
     }
 
+    // Currently sending test data. Implement actual read system using addr...
+    clear_buf(&rec_data);
+
+    // send_ready();
 
 
+    rec_data = 0xABCDEF01;
+    create_output_queue(&rec_data, 32);
+    wait_for_queue_results();
+    Serial.println("Sent R/W-Status data to CPU (just testing atm)");
 
-  // Flash read/write test
-  // char str[] = "This is a sample string";
-  // addr = 0;
-  
-  // Serial.printf("Sample Text Write: %d\n", ret);
-  // FL_printChar(addr, addr+strlen(str));
-  // FL_printHex(addr, addr+strlen(str));
+    clear_buf(&cmd_rec);
+    create_input_queue(&cmd_rec, 32);
+  }
+  cmd_rdy = false;
 
-
-  // // Needs one dedicated core to service CPU SPI requests
-  // if (cmd_rdy) {
-  //   cmd_rdy = false;
-  //   send_ready();
-  //   uint64_t i = 0;
-  //   get_ready();
-  //   wait_for_queue_results();  // Makes sure cmd is received
-
-  //   Serial.print("\ncmd line: 0b");
-  //   // cmd_rec &= 0xFF;
-  //   for (int i = 7; i >= 0; i--) Serial.printf("%d", 1 && (cmd_rec & (1 << i)));
-  //   Serial.println();
-
-  //   struct cmd_data cmd = parse_cmd(cmd_rec, true);
-  //   clear_buf(&cmd_rec);
-  //   clear_buf(&rec_data);
-
-  //   if (cmd.write) {                      // Write cmd needs addr & write payload
-  //     create_input_queue(&rec_data, 64);
-  //   } else {                              // Reads cmd just needs addr
-  //     create_input_queue(&rec_data, 32);
-  //   }
-  //   send_ready();
-
-  //   Serial.println("Waiting for addr");
-  //   while (!cmd_rdy) vTaskDelay(100);
-  //   wait_for_queue_results();
-  //   payload = 0;
-  //   Serial.print("addr: 0b");
-  //   addr = (uint32_t)(rec_data & 0xFFFFFFFF);
-  //   if (cmd.write) {
-  //     payload = (uint32_t) (rec_data >> 32);
-  //     print_buf((uint64_t*) &addr, 32);
-  //     Serial.printf("data: 0b");
-  //     print_buf((uint64_t*) &payload, 32);
-  //   } else {
-  //     print_buf((uint64_t*) &addr, 32);
-
-  //   }
-
-  //   if (!cmd.write) {                 // write == 0 means reading
-  //     Serial.println("Read command");
-  //   } else {
-  //     Serial.println("Write command");
-  //     // Add control flow so only SB-targetted writes trigger send_MP3
-  //     bring_in_the_olives = true;
-  //   }
-
-  //   // Currently sending test data. Implement actual read system using addr...
-  //   clear_buf(&rec_data);
-  //   // rec_data = 0xABCDEF01;
-
-  //   // create_output_queue(&rec_data, 32);
-  //   // wait_for_queue_results();
-  //   // Serial.println("Allegedly sent R/W-Status data");
-  //   clear_buf(&cmd_rec);
-  //   create_input_queue(&cmd_rec, 32);
-  // }
-  // cmd_rdy = false;
-
-  // // // If RX'ed a CPU write command to SB, play music
+  // // If RX'ed a CPU write command to SB, play music
   // bring_in_the_olives = true;
   // if (bring_in_the_olives) {
   //   bring_in_the_olives = false;
@@ -522,6 +478,6 @@ void loop() {
   //   delay(2500);
   // }
 
-  delay(8*1000);
+  delay(1000);
   Serial.println("Repeating main loop");
 }

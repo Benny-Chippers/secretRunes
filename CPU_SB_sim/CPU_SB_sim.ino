@@ -40,6 +40,10 @@ void IRAM_ATTR d_isr() {
   d_rdy = true;
 }
 
+
+char str[1025] = { '\0' };
+uint32_t str_idx = 0;
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
@@ -91,14 +95,17 @@ void setup() {
     Serial.println("Error: Couldn't add peripheral device");
     return;
   }
-  Serial.println("\nCPU Initialized");
 
+  memcpy(str, "This is the string I am sending. It should end here.\n", 256);
+  d_rdy = false;
+
+  Serial.println("\nCPU Initialized");
 }
 
 
 
 bool cpu_send_cmd(uint8_t cmd, uint32_t addr_i, uint32_t payload, bool debug) {
-// To send data to peripheral, make a spi_transaction_t struct and
+  // To send data to peripheral, make a spi_transaction_t struct and
   // call spi_device_queue_trans/spi_device_get_trans_result or spi_device_transmit
   spi_transaction_t message;
   memset(&message, 0, sizeof(message));
@@ -126,6 +133,8 @@ bool cpu_send_cmd(uint8_t cmd, uint32_t addr_i, uint32_t payload, bool debug) {
     }
   }
   d_rdy = false;
+  Serial.println("Getting first D_RDY trigger");
+
 
   // SPI Transmission to send cmd word
   if (ESP_OK != spi_device_transmit(guest_name, &message)) {
@@ -137,7 +146,7 @@ bool cpu_send_cmd(uint8_t cmd, uint32_t addr_i, uint32_t payload, bool debug) {
   memset(&message, 0, sizeof(message));
 
   message.flags = 0; //SPI_TRANS_USE_TXDATA
-  if (1 && (cmd & 0b00000011)) {  // write cmd, need to send payload data with address
+  if (1 && (cmd & 0b00000001)) {  // write cmd, need to send payload data with address
     message.length = 64;
   } else {
     message.length = 32;
@@ -160,9 +169,9 @@ bool cpu_send_cmd(uint8_t cmd, uint32_t addr_i, uint32_t payload, bool debug) {
     Serial.println("");
   
 
-    Serial.print("addr: 0b");
+    Serial.printf("addr: 0x%x", addr_i);
     // Serial.print(addr, BIN);
-    for (int i = 61; i >= 0; i--) Serial.print(bitRead(addr, i));
+    // for (int i = 61; i >= 0; i--) Serial.print(bitRead(addr, i));
     
     Serial.println("");
   }
@@ -185,7 +194,18 @@ void send_ready() {
 
 // Simulation of one CPU memory/SB request
 void loop() {
-  Serial.printf("Sending cmd & addr: %d\n", cpu_send_cmd(0b10101011, 0x0F0F0F0F, 0xF0F0F0F0, true));
+  // char str[] = "This is the string I am sending. It should end here.\n";
+  uint32_t payload = 0;
+  if (str_idx < 256) {
+    payload = (str[str_idx+3]<<3*8) | (str[str_idx+2]<<2*8) | (str[str_idx+1]<<8) | (str[str_idx]); 
+    str_idx += 4;
+  } else {
+    str_idx = 0;
+  }
+  cpu_send_cmd(0b00011111, 4*0x100, payload, true);
+
+  // Serial.printf("Sending cmd & addr: %d\n", cpu_send_cmd(0b00011111, 4*0x100, payload, true));
+  
   // digitalWrite(VSPI_D2, LOW);
   // delay(10);
   // digitalWrite(VSPI_D2, HIGH);
@@ -196,16 +216,14 @@ void loop() {
     vTaskDelay(1);
     uint64_t i = 0;
     if (i++ > 1000) {
-      Serial.println("Waiting for D_RDY, a second time");
+      Serial.println("Waiting for second D_RDY");
       send_ready();
       i = 0;
     }
   }
-  d_rdy = false;
-
 
   if (d_rdy) {
-    Serial.println("Getting D_RDY trigger");
+    Serial.println("Getting second D_RDY trigger");
     static uint32_t buf = 0;
     memset(&buf, 0, sizeof(buf));
 
@@ -228,13 +246,9 @@ void loop() {
       return;
     }
 
-    Serial.printf("SPI NB: 0b");
-    for (uint8_t i = 31; i > 0; i--) Serial.printf("%d", 1 && (buf & (1 << i)));
-
-    // // Serial.print(buf, BIN);
-    Serial.println("");
-
+    Serial.printf("SPI NB: 0x%x\n", buf);
     d_rdy = false;
   }
-  vTaskDelay(2500);
+  delay(250);
+  Serial.println("Weeee");
 }
