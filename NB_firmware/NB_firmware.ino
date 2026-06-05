@@ -127,10 +127,10 @@ bool init_spi(spi_host_device_t host, int cs, bool debug) {
   };
 
   if (ESP_OK != spi_slave_initialize(host, &spi_bus, &peripheral_config, 0)) {
-    Serial.println("Error: Couldn't initialize NB as a SPI peripheral");
+    if (DEBUG) Serial.println("Error: Couldn't initialize NB as a SPI peripheral");
     return false;
   }
-  if (debug) Serial.println("SPI peripheral device initialized");
+  if (DEBUG) Serial.println("SPI peripheral device initialized");
   return true;
 }
 
@@ -138,15 +138,15 @@ bool init_spi(spi_host_device_t host, int cs, bool debug) {
 // Reads data from given SD card file to Serial Monitor. Note: prefix filenames with '/'
 void read_SD(const char filepath[]) {
   if (SD.exists(filepath)) {
-    Serial.printf("%s:\n", filepath);
+    if (DEBUG) Serial.printf("%s:\n", filepath);
     File f = SD.open(filepath);
     while (f.available()) {
-      Serial.write(f.read());
+      if (DEBUG) Serial.write(f.read());
     }
     f.close();
-    Serial.println("\n");
+    if (DEBUG) Serial.println("\n");
   } else {
-    Serial.printf("Error: %s doesn't exist\n", filepath);
+    if (DEBUG) Serial.printf("Error: %s doesn't exist\n", filepath);
   }
 }
 
@@ -172,7 +172,7 @@ struct cmd_data parse_cmd(uint8_t cmd, bool debug) {
   ret.size = size;
   ret.write = write;
 
-  if (debug) print_cmd_data(ret);
+  if (DEBUG) print_cmd_data(ret);
   
   return ret;
 }
@@ -188,7 +188,7 @@ void create_input_queue(uint64_t* buf, int size) {
 
   // Queues message
   if (ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
-    Serial.println("Error: couldn't request command");
+    if (DEBUG) Serial.println("Error: couldn't request command");
   }
 }
 
@@ -204,7 +204,7 @@ void create_output_queue(uint64_t* buf, int size) {
   
   // Queues message
   if (ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
-    Serial.println("Error: couldn't request command");
+    if (DEBUG) Serial.println("Error: couldn't request command");
   }
   // send_ready();                         // For actual program, send trigger before transaciton
   // Serial.println("Data Ready");
@@ -214,7 +214,7 @@ void create_output_queue(uint64_t* buf, int size) {
 void wait_for_queue_results() {
   spi_slave_transaction_t* msg_rcv;  // Transaction struct
   if (ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&msg_rcv, portMAX_DELAY)) {
-    Serial.println("Error: couldn't receive command");
+    if (DEBUG) Serial.println("Error: couldn't receive command");
   }
 }
 
@@ -231,9 +231,9 @@ void get_ready() {
     vTaskDelay(1);
     uint64_t i = 0;
     if (i++ > 1000) {
-      Serial.println("Waiting for CMD_RDY");
+      if (DEBUG) Serial.println("Waiting for CMD_RDY");
       send_ready();
-      Serial.println("Data Ready");
+      if (DEBUG) Serial.println("Data Ready");
       i = 0;
     }
   }
@@ -243,7 +243,7 @@ void get_ready() {
 
 // Consider deleting: same functionality with debug = true
 void print_cmd_data(struct cmd_data data) {
-  Serial.printf("dest: 0x%x\tsize: 0x%x\twrite: %d\n", data.dest, data.size, data.write);
+  if (DEBUG) Serial.printf("dest: 0x%x\tsize: 0x%x\twrite: %d\n", data.dest, data.size, data.write);
 }
 
 // Clears 64-bit buffer (replacing with 0s)
@@ -253,8 +253,8 @@ void clear_buf(uint64_t* buf) {
 
 // Prints n-bit buffer in binary
 void print_buf(uint64_t* buf, int n) {
-  for (int j = n-1; j >= 0; j--) Serial.printf("%d",bitRead(*buf, j));
-  Serial.printf("\n");
+  for (int j = n-1; j >= 0; j--) if (DEBUG) Serial.printf("%d",bitRead(*buf, j));
+  if (DEBUG) Serial.printf("\n");
 }
 
 
@@ -285,7 +285,7 @@ void SB_handler(void* parameter) {
 
       if (xSemaphoreTake(SB_mut, MUT_TIME)) {
         SB_reg = i;
-        Serial.printf("SB: 0x%08x\n", SB_reg);
+        if (DEBUG) Serial.printf("SB: 0x%08x\n", SB_reg);
         xSemaphoreGive(SB_mut);
       }
     }
@@ -298,20 +298,20 @@ void setup() {
   Serial.begin(115200);
   randomSeed(time(NULL));
   SBuart.begin(UART_BAUD);
-  Serial.println("\nHSPI Init...");
+  if (DEBUG) Serial.println("\nHSPI Init...");
 
   FL_init(10);
 
-  Serial.printf("\nSD Init: %d\n", SD_init(0));
+  if (DEBUG) Serial.printf("\nSD Init: %d\n", SD_init(0));
 
   init_spi(cpu_host, VSPI_CS, true);
   if (fencepost) {
     fencepost = false;
-    Serial.println("Ready to receive cmd");
+    if (DEBUG) Serial.println("Ready to receive cmd");
     create_input_queue(&cmd_rec, 32);
   }
 
-  Serial.println("\nNorthbridge initialized");
+  if (DEBUG) Serial.println("\nNorthbridge initialized");
 
   while (SB_mut == NULL) {
     SB_mut = xSemaphoreCreateMutex();
@@ -326,7 +326,7 @@ uint32_t sd_test = (uint32_t)-1;
 void loop() {
   if (xSemaphoreTake(SB_mut, MUT_TIME)) {
     // SB_keyboard = i++;
-    Serial.printf("NB: 0x%08x\n", SB_reg);
+    if (DEBUG) Serial.printf("NB: 0x%08x\n", SB_reg);
     xSemaphoreGive(SB_mut);
   }  
 
@@ -369,15 +369,15 @@ void loop() {
     
     cmd_rdy = false;
     send_ready();
-    Serial.println("Data Ready");
+    if (DEBUG) Serial.println("Data Ready");
     uint64_t i = 0;
     get_ready();
     wait_for_queue_results();  // Makes sure cmd is received
 
-    Serial.print("\ncmd line: 0b");
+    if (DEBUG) Serial.print("\ncmd line: 0b");
     // cmd_rec &= 0xFF;
-    for (int i = 31; i >= 0; i--) Serial.printf("%d", 1 && (cmd_rec & (1 << i)));
-    Serial.println();
+    for (int i = 31; i >= 0; i--) if (DEBUG) Serial.printf("%d", 1 && (cmd_rec & (1 << i)));
+    if (DEBUG) Serial.println();
 
     struct cmd_data cmd = parse_cmd(cmd_rec, true);
     clear_buf(&cmd_rec);
@@ -390,9 +390,9 @@ void loop() {
     }
     cmd_rdy = false;
     send_ready();
-    Serial.println("Data Ready");
+    if (DEBUG) Serial.println("Data Ready");
 
-    Serial.println("Waiting for addr");
+    if (DEBUG) Serial.println("Waiting for addr");
     while (!cmd_rdy) vTaskDelay(100);
     wait_for_queue_results();
     payload = 0;
@@ -409,84 +409,80 @@ void loop() {
 
     uint32_t retWord = (uint32_t)-1;
     if (!cmd.write) {                 // write == 0 means reading
-      Serial.println("Read command");
-      Serial.printf("addr: 0x%08x\n", addr);
+      if (DEBUG) Serial.println("Read command");
+      if (DEBUG) Serial.printf("addr: 0x%08x\n", addr);
 
       // Implement read...
       switch(cmd.dest) {
         case PSRAM:
-          Serial.println("The PSRAM read totally works...");
+          if (DEBUG) Serial.println("The PSRAM read totally works...");
           break;
         case FLASH:
-          Serial.println("The Flash read totally works...");
+          if (DEBUG) Serial.println("The Flash read totally works...");
           retWord = FL_readWord(addr, true);
 
-          Serial.printf("flash read: 0x%08x\n", retWord);
+          if (DEBUG) Serial.printf("flash read: 0x%08x\n", retWord);
 
           break;
         case SD_CARD:
-          Serial.printf("The SD read totally works...0x%08x\n", sd_test);
+          if (DEBUG) Serial.printf("The SD read totally works...0x%08x\n", sd_test);
           retWord = sd_test;
           break;
-        case SB:      // May be unused
+        case SB:      // CPU reading SB's keyboard inputs
+          if (DEBUG) Serial.printf("Reading from SB: ");
           if (xSemaphoreTake(SB_mut, MUT_TIME)) {
-            Serial.printf("Reading from SB: 0x%08x\n", SB_reg);
+            if (DEBUG) Serial.printf("0x%08x\n", SB_reg);
             retWord = SB_reg;
             xSemaphoreGive(SB_mut);
           }
           break;
         case CPU_S:
         default:
-          Serial.println();
+          if (DEBUG) Serial.println("CPU reading from serial...? Shouldn't happen");
           break;
       }
 
       rec_data = unjumble(retWord);
       create_output_queue(&rec_data, 32);
       send_ready();
-      Serial.println("Data Ready");
+      if (DEBUG) Serial.println("Data Ready");
       // while (!cmd_rdy) vTaskDelay(1);
       wait_for_queue_results();
       
       // Send back data...
     } else {
-      Serial.println("Write command");
+      if (DEBUG) Serial.println("Write command");
       // Add control flow so only SB-targetted writes trigger send_MP3
       payload = (uint32_t) (rec_data >> 32);
       payload = unjumble(payload);
       // CPU sends data jumbled, so we need to unjumble it when we receive & jumble it when send
-      Serial.printf("addr: 0x%08x\t", addr);
-      Serial.printf("data: 0x%08x\n", payload);
+      if (DEBUG) Serial.printf("addr: 0x%08x\t", addr);
+      if (DEBUG) Serial.printf("data: 0x%08x\n", payload);
       
-      
-
       // bring_in_the_olives = true;
       uint32_t w_status = 0;
       switch(cmd.dest) {
         case PSRAM:
-          Serial.println("The PSRAM write totally works...");
+          if (DEBUG) Serial.println("The PSRAM write totally works...");
           break;
         case FLASH:
-          Serial.println("The Flash write totally works...");
+          if (DEBUG) Serial.println("The Flash write totally works...");
           FL_writeWord(addr, payload, true);
-
           break;
         case SD_CARD:
           sd_test = payload;
           retWord = payload;
-          Serial.printf("The SD write totally works...0x%08x", sd_test);
+          if (DEBUG) Serial.printf("The SD write totally works...0x%08x", sd_test);
 
           break;
         case SB:      // Triggers NB-CPU music transfer
+          if (DEBUG) Serial.println("Write to SB... what?");
           break;
         case CPU_S:
         default:
-          // char str[] = ;
-          // for (uint32_t i = 0; i < 4; i++) {
           uint8_t byte = payload;
           srl_buf[srl_idx++] = byte;
-          // }
-          Serial.println("Added CPU serial output to buffer");
+          if (DEBUG) Serial.println("Added CPU serial output to buffer");
           bool endFound = false;
           for (uint32_t i = 0; i < SRL_MAX; i++) {
             if (srl_buf[i] == '\n') {
@@ -494,14 +490,14 @@ void loop() {
             }
           }
           if (endFound) {
-            Serial.printf("CPU says: %s", srl_buf);
+            if (DEBUG) Serial.printf("CPU says: %s", srl_buf);
             memset(srl_buf, '\0', SRL_MAX);
             srl_idx = 0;
           }
           break;
       }
       send_ready();
-      Serial.println("Data Ready");
+      if (DEBUG) Serial.println("Data Ready");
     }
 
     // Currently sending test data. Implement actual read system using addr...
@@ -509,11 +505,8 @@ void loop() {
 
     cmd_rdy = false;
 
-    // while (!cmd_rdy) vTaskDelay(1);
-    // wait_for_queue_results();
-    Serial.println("Sent R/W-Status data to CPU (just testing atm)");
+    if (DEBUG) Serial.println("Finished CPU transaction");
 
-    // 
     clear_buf(&cmd_rec);
     create_input_queue(&cmd_rec, 32);
   }

@@ -13,18 +13,12 @@
 extern const int NUM_WAV;
 extern char* wavs[];         
 
-
+#define DEBUG     0
 #define UART_PORT UART_NUM_2
 #define TRAN_SIZE 32768.0    // Size of UART transactions (what units?)
 #define UART_BAUD 74880      // Baud Rate (symbols/sec) for NB-SB UART
-#define FL_FREQ 1*1000*1000 // in Hz
-#define PS_FREQ FL_FREQ
-
-
-
-
-
-
+#define FL_FREQ   1*1000*1000 // in Hz
+#define PS_FREQ   FL_FREQ
 
 
 

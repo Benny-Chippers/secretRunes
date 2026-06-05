@@ -33,19 +33,19 @@ extern SPIFlash psram;  // Not yet working
 bool SD_init(double timeout) {
   SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_SD);
   double elapsed = 0;
-  Serial.printf("SD Initing...\n");
+  if (DEBUG) Serial.printf("SD Initing...\n");
 
   while (!SD.begin(HSPI_CS_SD, SPI) & (elapsed < timeout)) {  // Tries to connect for 2.5 seconds
-    Serial.println("Error: SD Card mount failed");
+    if (DEBUG) Serial.println("Error: SD Card mount failed");
     delay(2500);
     elapsed += 2.5;
   }
   uint8_t sd_type = SD.cardType();
   if (sd_type == CARD_NONE) {
-    Serial.println("Error: no SD Card attached");
+    if (DEBUG) Serial.println("Error: no SD Card attached");
     return false;
   }
-  Serial.printf("\nSD Card size: %d\nSectors: %d\nTotal: %d Bytes\nUsed: %d Bytes\n\n", SD.cardSize(), SD.numSectors(), SD.sectorSize(), SD.totalBytes(), SD.usedBytes());
+  if (DEBUG) Serial.printf("\nSD Card size: %d\nSectors: %d\nTotal: %d Bytes\nUsed: %d Bytes\n\n", SD.cardSize(), SD.numSectors(), SD.sectorSize(), SD.totalBytes(), SD.usedBytes());
   return true;
 }
 
@@ -56,7 +56,7 @@ size_t get_SD_size(const char filepath[]) {
     size_t size = f.size();
     return size;
   } else {
-    Serial.printf("Error: %s doesn't exist\n", filepath);
+    if (DEBUG) Serial.printf("Error: %s doesn't exist\n", filepath);
     return 0;
   }
 }
@@ -93,10 +93,10 @@ size_t read_SD_to_SB(const char filepath[], size_t size, uint8_t* buf) {
       // Serial.println("");
     }
     f.close();
-    Serial.println("exiting read_SD2buf");
+    if (DEBUG) Serial.println("exiting read_SD2buf");
     return sent;
   } else {
-    Serial.printf("Error: %s doesn't exist\n", filepath);
+    if (DEBUG) Serial.printf("Error: %s doesn't exist\n", filepath);
     return 0;
   }
 }
@@ -105,34 +105,34 @@ size_t read_SD_to_SB(const char filepath[], size_t size, uint8_t* buf) {
 // Buffer will be internally created and is deleted before the end of the function
 // Will return status: 0 is failure, otherwise number of bytes sent
 size_t send_MP3(const char filepath[]) {
-  Serial.println("sodjfoj");
+  if (DEBUG) Serial.println("send_MP3()");
   if (SD.exists(filepath)) {
     size_t size = get_SD_size(filepath);  // Opens file
     size_t sent = 0;
-    Serial.printf("File %s is: ", filepath);
-    Serial.print(size);
-    Serial.print(" bytes. Need ");
-    Serial.print(size / TRAN_SIZE);
-    Serial.println(" transmissions");
+    if (DEBUG) Serial.printf("File %s is: ", filepath);
+    if (DEBUG) Serial.print(size);
+    if (DEBUG) Serial.print(" bytes. Need ");
+    if (DEBUG) Serial.print(size / TRAN_SIZE);
+    if (DEBUG) Serial.println(" transmissions");
 
     while (sent < size) {   // Note: this may not need to be a loop
       uint8_t* buf = NULL;  // Allocates buffer
       buf = (uint8_t*)heap_caps_malloc(TRAN_SIZE + 1, MALLOC_CAP_8BIT);
       if (NULL == buf) {
-        Serial.println("failed to make buffer");
+        if (DEBUG) Serial.println("failed to make buffer");
         return 0;
       }
       memset(buf, '\0', TRAN_SIZE + 1);
       sent += read_SD_to_SB(filepath, size, (uint8_t*)buf);  // Reads file to buffer
-      Serial.println("");
+      if (DEBUG) Serial.println("");
       heap_caps_free((void*)buf);
     }
 
-    Serial.println("sent mp3");
+    if (DEBUG) Serial.println("sent mp3");
 
     return size;
   } else {
-    Serial.printf("Error: %s not found\n", filepath);
+    if (DEBUG) Serial.printf("Error: %s not found\n", filepath);
     return 0;
   }
 }
@@ -146,11 +146,11 @@ bool FL_init(double timeout) {
   while((ret == 0) && ((0.25)*(double)i++ < timeout)) {
     ret = flash.begin(16*1000*1000);
     delay(250);
-    Serial.println("Trying to init...");
+    if (DEBUG) Serial.println("Trying to init...");
   }
-  Serial.printf("Flash Init: %d\tJEDEC ID: 0x%x\t", ret, flash.getJEDECID());
+  if (DEBUG) Serial.printf("Flash Init: %d\tJEDEC ID: 0x%x\t", ret, flash.getJEDECID());
   FL_MAX = flash.getCapacity();
-  Serial.printf("%d kB Capacity\n", FL_MAX / 1000);
+  if (DEBUG) Serial.printf("%d kB Capacity\n", FL_MAX / 1000);
   for (uint32_t i = 0; i < 1024; i++) {
     secBuf[i] = (uint32_t)-1;
   }
@@ -161,7 +161,7 @@ bool FL_init(double timeout) {
 // Wipes entire flash chip. Be cautious about using this function
 bool FL_clear() {
   if (!flash.eraseChip()) {
-    Serial.println("Error: Couldn't clear Flash Memory");
+    if (DEBUG) Serial.println("Error: Couldn't clear Flash Memory");
     return false;
   }
   return true;
@@ -175,46 +175,46 @@ uint32_t FL_printHexWord(uint32_t addr) {
   uint32_t data = -1;
   ret = 0;
   data = FL_readWord(addr, false);
-  Serial.printf("FL:\t0x%x:\t0x%x\n", addr, data);
+  if (DEBUG) Serial.printf("FL:\t0x%x:\t0x%x\n", addr, data);
   return data;
 }
 
 // Prints serial bytes as hex values
 void FL_printHex(uint32_t start, uint32_t end) {
   uint8_t test[end - start + 1] = { 0 };
-  Serial.printf("Reading from flash:\n");
+  if (DEBUG) Serial.printf("Reading from flash:\n");
   ret = 0;
   ret = flash.readByteArray(start, (uint8_t*)&test, end - start, true);
   if (!ret) {
-    Serial.println("Error: Couldn't read flash");
+    if (DEBUG) Serial.println("Error: Couldn't read flash");
     return;
   }
   for (uint32_t i = start; i < end; i++) {
     if ((i % (0xFF + 1)) == 0) {
-      Serial.printf("\n0x%x\t", i);
+      if (DEBUG) Serial.printf("\n0x%x\t", i);
     }
-    Serial.printf("%x", test[i]);
+    if (DEBUG) Serial.printf("%x", test[i]);
   }
-  Serial.printf("\nEnd read\n");
+  if (DEBUG) Serial.printf("\nEnd read\n");
 }
 
 // Prints serial bytes as characters
 void FL_printChar(uint32_t start, uint32_t end) {
   uint8_t test[end - start] = { 0 };
-  Serial.printf("Reading from flash:\n");
+  if (DEBUG) Serial.printf("Reading from flash:\n");
   ret = 0;
   ret = flash.readByteArray(start, (uint8_t*)&test, (end - start), true);
   if (!ret) {
-    Serial.println("Error: Couldn't read flash");
+    if (DEBUG) Serial.println("Error: Couldn't read flash");
     return;
   }
   for (uint32_t i = start; i < end; i++) {
     if ((i % (0xFF + 1)) == 0) {
-      Serial.printf("\n0x%x\t", i);
+      if (DEBUG) Serial.printf("\n0x%x\t", i);
     }
-    Serial.printf("%c", test[i]);
+    if (DEBUG) Serial.printf("%c", test[i]);
   }
-  Serial.printf("\nEnd read\n");
+  if (DEBUG) Serial.printf("\nEnd read\n");
 }
 
 // Erases sector, then write buffer to said sector
@@ -266,7 +266,7 @@ bool FL_flush(uint32_t newSecIdx, bool debug) {
 // In order to allow word-level writes, we will need to see if we have to
 // erase the whole sector and if so, rewrite all but the new word
 bool FL_writeWord(const uint32_t addr, uint32_t data, bool debug) {
-  Serial.printf("FL_writeWord: addr 0x%08x\tdata 0x%08x\n", addr, data);
+  if (DEBUG) Serial.printf("FL_writeWord: addr 0x%08x\tdata 0x%08x\n", addr, data);
   if (addr % 4 ) {            // Ensures addr is word-aligned
     return false;
   }
@@ -281,7 +281,7 @@ bool FL_writeWord(const uint32_t addr, uint32_t data, bool debug) {
   }
   secBuf[(addr & 0xFFF) >> 2] = data;
 
-  Serial.println("Reaching end");  
+  if (DEBUG) Serial.println("Reaching end");  
   secDif = true;
   return true;
 }
