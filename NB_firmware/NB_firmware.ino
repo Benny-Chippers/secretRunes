@@ -233,12 +233,13 @@ uint64_t get_ready() {
   uint64_t elapsed = 0;
   while(cmd_rdy == false) {
     delay(1);
-    elapsed++
+    elapsed++;
     if (i++ > 15) {
       return elapsed;
     }
   }
   cmd_rdy = false;
+  return elapsed;
 }
 
 
@@ -278,15 +279,17 @@ TaskHandle_t Task1;
 void SB_handler(void* parameter) {
   for (;;) {
 
-    // while (SBuart.available() > 0) {
-    while (Serial.available() > 0) {
+    while (SBuart.available() > 0) {
+    // while (Serial.available() > 0) {
 
-      // uint32_t i = SBuart.read();
-      uint32_t i = Serial.read();
+      uint32_t i = SBuart.read();
+      i |= (SBuart.read() << 8);
+      i |= (SBuart.read() << 16);
+      i |= (SBuart.read() << 24);
+      // uint32_t i = Serial.read();
 
       if (xSemaphoreTake(SB_mut, MUT_TIME)) {
         SB_reg = i;
-        if (DEBUG) Serial.printf("SB: 0x%08x\n", SB_reg);
         xSemaphoreGive(SB_mut);
       }
     }
@@ -333,9 +336,9 @@ void spi_handler() {
   if(transaction_started == true){
     if(!cmd_rdy) {
       remessage_counter += 1;
-      if(remessage_counter == 1000)
+      if(remessage_counter == 20000);
       {
-        serial.printf("Attempting to send: ");
+        Serial.printf("Attempting to send\n");
         send_ready();
         remessage_counter = 0;
       }
@@ -499,7 +502,7 @@ void spi_handler() {
 void loop() {
   if (xSemaphoreTake(SB_mut, MUT_TIME)) {
     // SB_keyboard = i++;
-    if (DEBUG) Serial.printf("NB: 0x%08x\n", SB_reg);
+    Serial.printf("NB: 0x%08x\n", SB_reg);
     xSemaphoreGive(SB_mut);
   }  
 
