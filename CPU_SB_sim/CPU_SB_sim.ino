@@ -206,15 +206,18 @@ void send_ready() {
 
 // Simulation of one CPU memory/SB request
 void loop() {
-  // char str[] = "This is the string I am sending. It should end here.\n";
+  char str[] = "This is the string I am sending. It should end here.\n";
   uint32_t payload = 0;
-  if (str_idx < 256) {
+  if (str_idx < 46) {
     payload = (str[str_idx+3]<<3*8) | (str[str_idx+2]<<2*8) | (str[str_idx+1]<<8) | (str[str_idx]); 
     str_idx += 4;
   } else {
     str_idx = 0;
   }
-  cpu_send_cmd(0b00011111, 4*0x100, 0x12345678, true);
+
+
+
+  cpu_send_cmd(0b01001111, 4*0x100, payload, true);
 
   // Serial.printf("Sending cmd & addr: %d\n", cpu_send_cmd(0b00011111, 4*0x100, payload, true));
   

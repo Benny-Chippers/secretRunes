@@ -208,6 +208,7 @@ void create_output_queue(uint64_t* buf, int size) {
     Serial.println("Error: couldn't request command");
   }
   send_ready();                         // For actual program, send trigger before transaciton
+  Serial.println("Data Ready");
 }
 
 // Gets NB-CPU transaction results
@@ -233,6 +234,7 @@ void get_ready() {
     if (i++ > 1000) {
       Serial.println("Waiting for CMD_RDY");
       send_ready();
+      Serial.println("Data Ready");
       i = 0;
     }
   }
@@ -301,6 +303,9 @@ void setup() {
   Serial.println("\nNorthbridge initialized");
 }
 
+
+uint32_t sd_test = (uint32_t)-1;
+
 // Main control loop
 void loop() {
   
@@ -341,8 +346,10 @@ void loop() {
 
   // Needs one dedicated core to service CPU SPI requests
   if (cmd_rdy) {
+    
     cmd_rdy = false;
     send_ready();
+    Serial.println("Data Ready");
     uint64_t i = 0;
     get_ready();
     wait_for_queue_results();  // Makes sure cmd is received
@@ -363,6 +370,7 @@ void loop() {
     }
     cmd_rdy = false;
     send_ready();
+    Serial.println("Data Ready");
 
     Serial.println("Waiting for addr");
     while (!cmd_rdy) vTaskDelay(100);
@@ -377,7 +385,7 @@ void loop() {
       // print_buf((uint64_t*) &addr, 32);
       // Serial.printf("addr: 0x%08x\n", addr);
     // }
-
+    uint32_t retWord = (uint32_t)-1;
     if (!cmd.write) {                 // write == 0 means reading
       Serial.println("Read command");
       Serial.printf("addr: 0x%08x\n", addr);
@@ -395,8 +403,8 @@ void loop() {
 
           break;
         case SD_CARD:
-          Serial.println("The SD read totally works...");
-
+          Serial.printf("The SD read totally works...0x08%x\n", sd_test);
+          retWord = sd_test;
           break;
         case SB:      // May be unused
           break;
@@ -413,7 +421,10 @@ void loop() {
       payload = (uint32_t) (rec_data >> 32);
       Serial.printf("addr: 0x%08x\t", addr);
       Serial.printf("data: 0x%08x\n", payload);
-      
+
+
+      retWord = payload;
+
       // bring_in_the_olives = true;
       uint32_t w_status = 0;
       switch(cmd.dest) {
@@ -426,7 +437,9 @@ void loop() {
 
           break;
         case SD_CARD:
-          Serial.println("The SD write totally works...");
+          sd_test = payload;
+          retWord = payload;
+          Serial.printf("The SD write totally works...0x%08x", sd_test);
 
           break;
         case SB:      // Triggers NB-CPU music transfer
@@ -445,7 +458,7 @@ void loop() {
               endFound = true;
             }
           }
-          Serial.printf("CPU says: 0x%s", srl_buf);
+          Serial.printf("CPU says: %s", srl_buf);
           if (endFound) {
             memset(srl_buf, '\0', SRL_MAX);
             srl_idx = 0;
@@ -461,17 +474,16 @@ void loop() {
     // Currently sending test data. Implement actual read system using addr...
     clear_buf(&rec_data);
 
-    // send_ready();
-
-
-    rec_data = 0xABCDEF01;
+    rec_data = retWord;
     create_output_queue(&rec_data, 32);
     cmd_rdy = false;
     send_ready();
+    Serial.println("Data Ready");
     while (!cmd_rdy) vTaskDelay(1);
     wait_for_queue_results();
     Serial.println("Sent R/W-Status data to CPU (just testing atm)");
 
+    // 
     clear_buf(&cmd_rec);
     create_input_queue(&cmd_rec, 32);
   }
@@ -487,6 +499,6 @@ void loop() {
   // clear_buf(&cmd_rec);
   // create_input_queue(&cmd_rec, 32);
 
-  // delay(1000);
+  delay(1000);
   Serial.println("Repeating main loop");
 }
