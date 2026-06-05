@@ -397,9 +397,9 @@ void loop() {
           break;
         case FLASH:
           Serial.println("The Flash read totally works...");
-          payload = FL_readWord(addr, true);
+          retWord = FL_readWord(addr, true);
 
-          Serial.printf("flash read: 0x%08x\n", payload);
+          Serial.printf("flash read: 0x%08x\n", retWord);
 
           break;
         case SD_CARD:
@@ -414,6 +414,11 @@ void loop() {
           break;
       }
 
+      rec_data = retWord;
+      create_output_queue(&rec_data, 32);
+      while (!cmd_rdy) vTaskDelay(1);
+      wait_for_queue_results();
+      
       // Send back data...
     } else {
       Serial.println("Write command");
@@ -466,16 +471,11 @@ void loop() {
           
           break;
       }
-      // Send write-status back to CPU
-
-
     }
 
     // Currently sending test data. Implement actual read system using addr...
     clear_buf(&rec_data);
 
-    rec_data = retWord;
-    // create_output_queue(&rec_data, 32);
     cmd_rdy = false;
     send_ready();
     Serial.println("Data Ready");
