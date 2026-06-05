@@ -416,7 +416,7 @@ void loop() {
 
       rec_data = retWord;
       create_output_queue(&rec_data, 32);
-      while (!cmd_rdy) vTaskDelay(1);
+      // while (!cmd_rdy) vTaskDelay(1);
       wait_for_queue_results();
       
       // Send back data...
