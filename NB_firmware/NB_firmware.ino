@@ -363,6 +363,7 @@ void loop() {
     wait_for_queue_results();
     payload = 0;
     addr = (uint32_t)(rec_data & 0xFFFFFFFF);
+    addr = unjumble(addr);
     // if (cmd.write) {
       // payload = (uint32_t) (rec_data >> 32);
       // Serial.printf("addr: 0x%08x\t", addr);
@@ -412,12 +413,12 @@ void loop() {
       Serial.println("Write command");
       // Add control flow so only SB-targetted writes trigger send_MP3
       payload = (uint32_t) (rec_data >> 32);
+      payload = unjumble(payload);
+      // CPU sends data jumbled, so we need to unjumble it when we receive & jumble it when send
       Serial.printf("addr: 0x%08x\t", addr);
       Serial.printf("data: 0x%08x\n", payload);
       
-      // CPU sends data jumbled, so we need to unjumble it when we receive & jumble it when send
       
-      payload = unjumble(payload);
 
       // bring_in_the_olives = true;
       uint32_t w_status = 0;
@@ -441,10 +442,10 @@ void loop() {
         case CPU_S:
         default:
           // char str[] = ;
-          for (uint32_t i = 0; i < 4; i++) {
-            uint32_t byte = (payload & 0xFF<<8*i)>>8*i;
-            srl_buf[srl_idx++] = byte;
-          }
+          // for (uint32_t i = 0; i < 4; i++) {
+          uint8_t byte = payload;
+          srl_buf[srl_idx++] = byte;
+          // }
           Serial.println("Added CPU serial output to buffer");
           bool endFound = false;
           for (uint32_t i = 0; i < SRL_MAX; i++) {
