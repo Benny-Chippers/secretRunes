@@ -267,6 +267,23 @@ uint32_t unjumble(uint32_t d_i) {
   return (bytes[0]<<3*8) | (bytes[1]<<2*8) | (bytes[2]<<8) | (bytes[3]);
 }
 
+#define MUT_TIME 5000
+uint32_t SB_reg = 0;
+SemaphoreHandle_t SB_mut = NULL;
+TaskHandle_t Task1;
+void SB_handler(void* parameter) {
+  for (;;) {
+    if (Serial.available() > 0) {
+      uint32_t i = Serial.read();
+      if (xSemaphoreTake(SB_mut, MUT_TIME)) {
+        SB_reg = i;
+        Serial.printf("SB: 0x%08x\n", SB_reg);
+        xSemaphoreGive(SB_mut);
+      }
+    }
+  }
+}
+
 
 // Setup initialization
 void setup() {
@@ -287,6 +304,11 @@ void setup() {
   }
 
   Serial.println("\nNorthbridge initialized");
+
+  while (SB_mut == NULL) {
+    SB_mut = xSemaphoreCreateMutex();
+  }
+  xTaskCreatePinnedToCore(SB_handler, "SB Handler", 1000, NULL, 0, &Task1, 0);
 }
 
 
@@ -294,7 +316,11 @@ uint32_t sd_test = (uint32_t)-1;
 
 // Main control loop
 void loop() {
-  
+  if (xSemaphoreTake(SB_mut, MUT_TIME)) {
+    // SB_keyboard = i++;
+    Serial.printf("NB: 0x%08x\n", SB_reg);
+    xSemaphoreGive(SB_mut);
+  }  
 
   // if (!wrote_flash) {
   //   FL_clear();
@@ -453,8 +479,8 @@ void loop() {
               endFound = true;
             }
           }
-          Serial.printf("CPU says: %s", srl_buf);
           if (endFound) {
+            Serial.printf("CPU says: %s", srl_buf);
             memset(srl_buf, '\0', SRL_MAX);
             srl_idx = 0;
           }
