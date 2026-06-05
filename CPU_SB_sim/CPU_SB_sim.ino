@@ -208,7 +208,7 @@ void send_ready() {
 void loop() {
   char str[] = "This is the string I am sending. It should end here.\n";
   uint32_t payload = 0;
-  if (str_idx < 46) {
+  if (str_idx < 50) {
     payload = (str[str_idx+3]<<3*8) | (str[str_idx+2]<<2*8) | (str[str_idx+1]<<8) | (str[str_idx]); 
     str_idx += 4;
   } else {

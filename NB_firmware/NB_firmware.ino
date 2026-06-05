@@ -479,7 +479,7 @@ void loop() {
     cmd_rdy = false;
     send_ready();
     Serial.println("Data Ready");
-    while (!cmd_rdy) vTaskDelay(1);
+    // while (!cmd_rdy) vTaskDelay(1);
     wait_for_queue_results();
     Serial.println("Sent R/W-Status data to CPU (just testing atm)");
 
