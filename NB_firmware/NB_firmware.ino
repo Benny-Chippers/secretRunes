@@ -97,7 +97,6 @@ void IRAM_ATTR cmd_isr() {
   cmd_rdy = true;
 }
 
-
 // Initializes single SPI communication. Note: although Quad SPI is desired, the ESP-IDF 'Slave' Driver
 // only supports fullduplex (single) transactions and the Halfduplex driver doesn't support ESP32-wroom-32E
 bool init_spi(spi_host_device_t host, int cs, bool debug) {
@@ -259,28 +258,15 @@ void print_buf(uint64_t* buf, int n) {
 }
 
 
-// Flash initialization
-bool FL_init(double timeout) {
-  SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_FL);
-  SPI.setDataMode(SPI_MODE0);
-  ret = 0;
-  uint8_t i = 0;
-  while((ret == 0) && ((0.25)*(double)i++ < timeout)) {
-    ret = flash.begin(16*1000*1000);
-    delay(250);
-    Serial.println("Trying to init...");
+// Data from 
+uint32_t unjumble(uint32_t d_i) {
+  uint32_t bytes[4] = { 0 };
+  for (int i = 0; i < 4; i++) {
+    bytes[i] = (d_i & (0xFF<<8*i))>>8*i;
   }
-  Serial.printf("Flash Init: %d\tJEDEC ID: 0x%x\t", ret, flash.getJEDECID());
-  FL_MAX = flash.getCapacity();
-  Serial.printf("%d kB Capacity\n", FL_MAX / 1000);
-
-
-  for (uint32_t i = 0; i < 1024; i++) {
-    secBuf[i] = (uint32_t)-1;
-  }
-  secInit = false;
-  return ret;
+  return (bytes[0]<<3*8) | (bytes[1]<<2*8) | (bytes[2]<<8) | (bytes[3]);
 }
+
 
 // Setup initialization
 void setup() {
@@ -414,7 +400,7 @@ void loop() {
           break;
       }
 
-      rec_data = retWord;
+      rec_data = unjumble(retWord);
       create_output_queue(&rec_data, 32);
       send_ready();
       Serial.println("Data Ready");
@@ -428,9 +414,10 @@ void loop() {
       payload = (uint32_t) (rec_data >> 32);
       Serial.printf("addr: 0x%08x\t", addr);
       Serial.printf("data: 0x%08x\n", payload);
-
-
-      retWord = payload;
+      
+      // CPU sends data jumbled, so we need to unjumble it when we receive & jumble it when send
+      
+      payload = unjumble(payload);
 
       // bring_in_the_olives = true;
       uint32_t w_status = 0;
@@ -470,7 +457,6 @@ void loop() {
             memset(srl_buf, '\0', SRL_MAX);
             srl_idx = 0;
           }
-          
           break;
       }
       send_ready();

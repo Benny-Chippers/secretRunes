@@ -137,7 +137,26 @@ size_t send_MP3(const char filepath[]) {
   }
 }
 
-
+// Flash initialization
+bool FL_init(double timeout) {
+  SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_FL);
+  SPI.setDataMode(SPI_MODE0);
+  ret = 0;
+  uint8_t i = 0;
+  while((ret == 0) && ((0.25)*(double)i++ < timeout)) {
+    ret = flash.begin(16*1000*1000);
+    delay(250);
+    Serial.println("Trying to init...");
+  }
+  Serial.printf("Flash Init: %d\tJEDEC ID: 0x%x\t", ret, flash.getJEDECID());
+  FL_MAX = flash.getCapacity();
+  Serial.printf("%d kB Capacity\n", FL_MAX / 1000);
+  for (uint32_t i = 0; i < 1024; i++) {
+    secBuf[i] = (uint32_t)-1;
+  }
+  secInit = false;
+  return ret;
+}
 
 // Wipes entire flash chip. Be cautious about using this function
 bool FL_clear() {
