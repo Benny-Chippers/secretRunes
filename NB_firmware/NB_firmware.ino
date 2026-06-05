@@ -50,6 +50,8 @@ spi_bus_config_t spi_bus;
 spi_slave_interface_config_t peripheral_config;
 spi_dma_chan_t dma_config = SPI_DMA_DISABLED;
 int msg_idx;
+bool transaction_started;
+int remessage_counter;
 
 // Variables for CPU-NB SPI communication
 uint64_t cmd_rec = { 0 };
@@ -325,9 +327,24 @@ uint32_t sd_test = (uint32_t)-1;
 // TODO: put SPI transactions within one function. If anything hangs, exit and restart
 void spi_handler() {
   uint64_t elapsed = 0;
-  // Needs one dedicated core to service CPU SPI requests
+  // Needs one dedicated core to service CPU SPI requests]
+
+  // QUICK INCLUSION BY MAXWELL TO REMESSAGE
+  if(transaction_started == true){
+    if(!cmd_rdy) {
+      remessage_counter += 1;
+      if(remessage_counter == 1000)
+      {
+        serial.printf("Attempting to send: ");
+        send_ready();
+        remessage_counter = 0;
+      }
+    }
+  }
+
   if (cmd_rdy) {
-    
+    transaction_started = true; // MAXWELL REMESSAGE
+    remessage_counter = 0; // MAXWELL REMESSAGE
     cmd_rdy = false;
     send_ready();
     if (DEBUG) Serial.println("Data Ready");
