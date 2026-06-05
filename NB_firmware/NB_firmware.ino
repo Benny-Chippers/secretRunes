@@ -227,12 +227,12 @@ void send_ready() {
 
 // Waits until CPU triggers CMD_RDY
 void get_ready() {
+  uint64_t i = 0;
   while(cmd_rdy == false) {
     vTaskDelay(1);
-    uint64_t i = 0;
     if (i++ > 1000) {
       if (DEBUG) Serial.println("Waiting for CMD_RDY");
-      send_ready();
+      // send_ready();
       if (DEBUG) Serial.println("Data Ready");
       i = 0;
     }
@@ -330,40 +330,6 @@ void loop() {
     xSemaphoreGive(SB_mut);
   }  
 
-  // if (!wrote_flash) {
-  //   FL_clear();
-  //   wrote_flash = true;
-  //   for (uint32_t i = 0; i < 100; i++) {
-  //     FL_printHexWord(4*i);
-  //   }
-  //   for (int i = 0; i < 100; i++) {
-  //     uint32_t addr = 4*i;
-  //     uint32_t data = i;
-  //     FL_writeWord(addr, data, true);
-  //   }
-  
-  // //   // flash.eraseSector(addr);
-  // //   delay(2500);
-  // //   Serial.println("About to write to flash");
-    
-  // //   // FL_printHexWord(addr);
-
-  // //   // uint16_t data2 = 0xDEAD;
-  // //   FL_writeWord(addr, 0x89ABCDEF, true);
-  // //   // FL_printHexWord(addr);
-   
-  // //   delay(2500);
-
-  // //   // FL_writeWord(addr2, 0xDEADBEEF, true);
-  // //   // FL_printHexWord(addr2);
-
-  // //   Serial.println("Done");
-  // }
-
-  // for (uint32_t i = 0; i < 100; i++) {
-  //     FL_printHexWord(4*i);
-  // }
-
   // Needs one dedicated core to service CPU SPI requests
   if (cmd_rdy) {
     
@@ -388,12 +354,13 @@ void loop() {
     } else {                              // Reads cmd just needs addr
       create_input_queue(&rec_data, 32);
     }
-    cmd_rdy = false;
+    // cmd_rdy = false;
     send_ready();
     if (DEBUG) Serial.println("Data Ready");
 
     if (DEBUG) Serial.println("Waiting for addr");
-    while (!cmd_rdy) vTaskDelay(100);
+    // while (!cmd_rdy) vTaskDelay(100);
+    get_ready();   
     wait_for_queue_results();
     payload = 0;
     addr = (uint32_t)(rec_data & 0xFFFFFFFF);
@@ -490,7 +457,7 @@ void loop() {
             }
           }
           if (endFound) {
-            if (DEBUG) Serial.printf("CPU says: %s", srl_buf);
+            Serial.printf("CPU says: %s", srl_buf);
             memset(srl_buf, '\0', SRL_MAX);
             srl_idx = 0;
           }
@@ -503,7 +470,7 @@ void loop() {
     // Currently sending test data. Implement actual read system using addr...
     clear_buf(&rec_data);
 
-    cmd_rdy = false;
+
 
     if (DEBUG) Serial.println("Finished CPU transaction");
 
@@ -525,3 +492,38 @@ void loop() {
   delay(1000);
   Serial.println("Repeating main loop");
 }
+
+
+// if (!wrote_flash) {
+//   FL_clear();
+//   wrote_flash = true;
+//   for (uint32_t i = 0; i < 100; i++) {
+//     FL_printHexWord(4*i);
+//   }
+//   for (int i = 0; i < 100; i++) {
+//     uint32_t addr = 4*i;
+//     uint32_t data = i;
+//     FL_writeWord(addr, data, true);
+//   }
+
+// //   // flash.eraseSector(addr);
+// //   delay(2500);
+// //   Serial.println("About to write to flash");
+  
+// //   // FL_printHexWord(addr);
+
+// //   // uint16_t data2 = 0xDEAD;
+// //   FL_writeWord(addr, 0x89ABCDEF, true);
+// //   // FL_printHexWord(addr);
+  
+// //   delay(2500);
+
+// //   // FL_writeWord(addr2, 0xDEADBEEF, true);
+// //   // FL_printHexWord(addr2);
+
+// //   Serial.println("Done");
+// }
+
+// for (uint32_t i = 0; i < 100; i++) {
+//     FL_printHexWord(4*i);
+// }
