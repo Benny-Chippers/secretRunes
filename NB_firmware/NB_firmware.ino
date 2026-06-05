@@ -258,7 +258,7 @@ void print_buf(uint64_t* buf, int n) {
 }
 
 
-// Data from 
+// Data from CPU arrives out of order, so this is needed to remix it
 uint32_t unjumble(uint32_t d_i) {
   uint32_t bytes[4] = { 0 };
   for (int i = 0; i < 4; i++) {
@@ -267,14 +267,22 @@ uint32_t unjumble(uint32_t d_i) {
   return (bytes[0]<<3*8) | (bytes[1]<<2*8) | (bytes[2]<<8) | (bytes[3]);
 }
 
+
 #define MUT_TIME 5000
 uint32_t SB_reg = 0;
 SemaphoreHandle_t SB_mut = NULL;
 TaskHandle_t Task1;
+// Handler for incoming SB transactions. Reads UART keyboard inputs into SB_reg buffer
+// For debugging, takes in Serial input from NB
 void SB_handler(void* parameter) {
   for (;;) {
-    if (Serial.available() > 0) {
+
+    // while (SBuart.available() > 0) {
+    while (Serial.available() > 0) {
+
+      // uint32_t i = SBuart.read();
       uint32_t i = Serial.read();
+
       if (xSemaphoreTake(SB_mut, MUT_TIME)) {
         SB_reg = i;
         Serial.printf("SB: 0x%08x\n", SB_reg);
@@ -398,6 +406,7 @@ void loop() {
       // print_buf((uint64_t*) &addr, 32);
       // Serial.printf("addr: 0x%08x\n", addr);
     // }
+
     uint32_t retWord = (uint32_t)-1;
     if (!cmd.write) {                 // write == 0 means reading
       Serial.println("Read command");
@@ -420,6 +429,11 @@ void loop() {
           retWord = sd_test;
           break;
         case SB:      // May be unused
+          if (xSemaphoreTake(SB_mut, MUT_TIME)) {
+            Serial.printf("Reading from SB: 0x%08x\n", SB_reg);
+            retWord = SB_reg;
+            xSemaphoreGive(SB_mut);
+          }
           break;
         case CPU_S:
         default:
