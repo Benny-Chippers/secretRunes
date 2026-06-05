@@ -213,7 +213,7 @@ void create_output_queue(uint64_t* buf, int size) {
 // Gets NB-CPU transaction results
 void wait_for_queue_results() {
   spi_slave_transaction_t* msg_rcv;  // Transaction struct
-  if (ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&msg_rcv, portMAX_DELAY)) {
+  if (ESP_OK != spi_slave_get_trans_result(cpu_host, (spi_slave_transaction_t**)&msg_rcv, 1000)) {
     if (DEBUG) Serial.println("Error: couldn't receive command");
   }
 }
@@ -226,15 +226,14 @@ void send_ready() {
 }
 
 // Waits until CPU triggers CMD_RDY
-void get_ready() {
+uint64_t get_ready() {
   uint64_t i = 0;
+  uint64_t elapsed = 0;
   while(cmd_rdy == false) {
-    vTaskDelay(1);
-    if (i++ > 1000) {
-      if (DEBUG) Serial.println("Waiting for CMD_RDY");
-      // send_ready();
-      if (DEBUG) Serial.println("Data Ready");
-      i = 0;
+    delay(1);
+    elapsed++
+    if (i++ > 15) {
+      return elapsed;
     }
   }
   cmd_rdy = false;
@@ -322,14 +321,10 @@ void setup() {
 
 uint32_t sd_test = (uint32_t)-1;
 
-// Main control loop
-void loop() {
-  if (xSemaphoreTake(SB_mut, MUT_TIME)) {
-    // SB_keyboard = i++;
-    if (DEBUG) Serial.printf("NB: 0x%08x\n", SB_reg);
-    xSemaphoreGive(SB_mut);
-  }  
 
+// TODO: put SPI transactions within one function. If anything hangs, exit and restart
+void spi_handler() {
+  uint64_t elapsed = 0;
   // Needs one dedicated core to service CPU SPI requests
   if (cmd_rdy) {
     
@@ -337,7 +332,8 @@ void loop() {
     send_ready();
     if (DEBUG) Serial.println("Data Ready");
     uint64_t i = 0;
-    get_ready();
+    elapsed += get_ready();
+    if (elapsed > 20) return;
     wait_for_queue_results();  // Makes sure cmd is received
 
     if (DEBUG) Serial.print("\ncmd line: 0b");
@@ -360,7 +356,8 @@ void loop() {
 
     if (DEBUG) Serial.println("Waiting for addr");
     // while (!cmd_rdy) vTaskDelay(100);
-    get_ready();   
+    elapsed += get_ready();
+    if (elapsed > 20) return;   
     wait_for_queue_results();
     payload = 0;
     addr = (uint32_t)(rec_data & 0xFFFFFFFF);
@@ -470,14 +467,26 @@ void loop() {
     // Currently sending test data. Implement actual read system using addr...
     clear_buf(&rec_data);
 
-
-
     if (DEBUG) Serial.println("Finished CPU transaction");
-
     clear_buf(&cmd_rec);
     create_input_queue(&cmd_rec, 32);
   }
   cmd_rdy = false;
+  return;
+}
+
+
+
+
+// Main control loop
+void loop() {
+  if (xSemaphoreTake(SB_mut, MUT_TIME)) {
+    // SB_keyboard = i++;
+    if (DEBUG) Serial.printf("NB: 0x%08x\n", SB_reg);
+    xSemaphoreGive(SB_mut);
+  }  
+
+  spi_handler();
 
   // // If RX'ed a CPU write command to SB, play music
   // bring_in_the_olives = true;
@@ -489,7 +498,7 @@ void loop() {
   // clear_buf(&cmd_rec);
   // create_input_queue(&cmd_rec, 32);
 
-  delay(1000);
+  delay(10);
   Serial.println("Repeating main loop");
 }
 
