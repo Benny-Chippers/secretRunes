@@ -403,7 +403,7 @@ void loop() {
 
           break;
         case SD_CARD:
-          Serial.printf("The SD read totally works...0x08%x\n", sd_test);
+          Serial.printf("The SD read totally works...0x%08x\n", sd_test);
           retWord = sd_test;
           break;
         case SB:      // May be unused
@@ -416,6 +416,8 @@ void loop() {
 
       rec_data = retWord;
       create_output_queue(&rec_data, 32);
+      send_ready();
+      Serial.println("Data Ready");
       // while (!cmd_rdy) vTaskDelay(1);
       wait_for_queue_results();
       
@@ -471,14 +473,15 @@ void loop() {
           
           break;
       }
+      send_ready();
+      Serial.println("Data Ready");
     }
 
     // Currently sending test data. Implement actual read system using addr...
     clear_buf(&rec_data);
 
     cmd_rdy = false;
-    send_ready();
-    Serial.println("Data Ready");
+
     // while (!cmd_rdy) vTaskDelay(1);
     // wait_for_queue_results();
     Serial.println("Sent R/W-Status data to CPU (just testing atm)");
