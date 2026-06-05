@@ -207,8 +207,8 @@ void create_output_queue(uint64_t* buf, int size) {
   if (ESP_OK != spi_slave_queue_trans(cpu_host, &message, portMAX_DELAY)) {
     Serial.println("Error: couldn't request command");
   }
-  send_ready();                         // For actual program, send trigger before transaciton
-  Serial.println("Data Ready");
+  // send_ready();                         // For actual program, send trigger before transaciton
+  // Serial.println("Data Ready");
 }
 
 // Gets NB-CPU transaction results
