@@ -1,11 +1,10 @@
 #ifndef GLOBAL_H
 #define GLOBAL_H
-
+/*****************************************************************************/
 // Libraries
 #include <Arduino.h>
 #include <string.h>
 #include <driver/spi_slave.h>  // Doesn't play nicely with Quad SPI
-
 #include <driver/uart.h>
 #include <esp_random.h>
 #include <sdmmc_cmd.h>
@@ -16,15 +15,16 @@
 #include <FS.h>
 #include <SD.h>
 #include <SPI.h>
-
+/*****************************************************************************/
+// NB Firmware Header Files
 #include "config.h"
 #include "constants.h"
 #include "memory.h"
+/*****************************************************************************/
+// Function Declarations
 
-
-
+// For NB-SB Communication
 extern                              SoftwareSerial SBuart;
-extern const uint32_t               BUF_SIZE = 64;  // Bytes in tx/rx buffers
 
 // For VSPI Configuration
 extern spi_host_device_t            cpu_host;
@@ -51,10 +51,11 @@ extern uint32_t                     ret;
 extern bool                         fencepost;
 extern spi_slave_transaction_t      message;  // Transaction struct
 
-// Flash Indexing and buffering for writes 
+// Flash Indexing and buffering for writes (using a Read-Modify-Write buffering system)
 extern bool                         secInit;
 extern bool                         secDif;
 extern uint32_t                     secIdx;
 extern uint32_t                     secBuf[1024];
 
+/*****************************************************************************/
 #endif

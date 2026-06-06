@@ -1,12 +1,12 @@
-/* Author: Damian Amerman-Smith
- * Function declarations for memory I/O, including Flash, SD card, and PSRAM access.
- */
-
 #ifndef MEMORY_H
 #define MEMORY_H
-
+/*****************************************************************************
+ * Author: Damian Amerman-Smith
+ * Function declarations for memory I/O, including Flash, SD card, and PSRAM access.
+ *
+ * TODO: standardize naming scheme (change sd functions to "SD_...")
 /*****************************************************************************/
-// Defined constants for CPU memory requests
+// Defined constants for CPU read/write requests
 // Destination  
 #define     PSRAM   0b000
 #define     FLASH   0b001
@@ -27,6 +27,7 @@
 // SD Card I/O Functions
 bool      SD_init(double timeout);
 size_t    get_SD_size(const char filepath[]);
+void      read_SD(const char filepath[]);
 size_t    read_SD_to_SB(const char filepath[], size_t size, uint8_t* buf);
 size_t    send_MP3(const char filepath[]);
 
@@ -47,6 +48,4 @@ void      FL_printHex(uint32_t start, uint32_t end);
 void      FL_printChar(uint32_t start, uint32_t end);
 
 /*****************************************************************************/
-
-
 #endif

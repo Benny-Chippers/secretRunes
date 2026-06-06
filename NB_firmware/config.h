@@ -1,11 +1,12 @@
-/* Author: Damian Amerman-Smith
+#ifndef CONFIG_H
+#define CONFIG_H
+/*****************************************************************************
+ * Author: Damian Amerman-Smith
  * Config file for Macrocontroller's NB firmware.
  * Includes pin configurations for different Macrocontroller hardware.
  * For defined constants (e.g. adding a song to playlist), go to constants.h
- */
-#ifndef CONFIG_H
-#define CONFIG_H
-
+ *
+ *****************************************************************************/
 #include "constants.h"
 
 // Set one of the defines below to 1 to select the hardware configuration
@@ -13,7 +14,7 @@
 #define NB_MB     0         // Northbridge/Memory Block extended devkit
 
 
-#if BIG_BOARD       // Macrocontroller v1   
+#if BIG_BOARD       // Macrocontroller v1.1 and v1.2
   // Pins for Northbridge-CPU SPI
   #define VSPI_CS     18
   #define VSPI_CLK    5
@@ -35,7 +36,7 @@
   #define HSPI_CS_SD  26
   #define HSPI_CS_FL  27
   #define HSPI_CS_PS  15
-#elif NB_MB
+#elif NB_MB           // Northbridge & Memory-Block v3
   // Pins for Northbridge-CPU SPI
   #define VSPI_CS     5       
   #define VSPI_CLK    18      
@@ -59,8 +60,5 @@
   #define HSPI_CS_PS  2     // old NB/MB: 2, big board: 15
 #endif
 
-
-
-
-
+/*****************************************************************************/
 #endif

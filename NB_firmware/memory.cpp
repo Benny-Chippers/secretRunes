@@ -1,13 +1,12 @@
-#include <stdint.h>
-/* Author: Damian Amerman-Smith
+/*****************************************************************************
+ * Author: Damian Amerman-Smith
  * Helper functions for memory I/O, including Flash, SD card, and PSRAM access.
- */
-
+ *****************************************************************************/
 // Libraries
 #include <Arduino.h>
+#include <stdint.h>
 #include <string.h>
 #include <driver/spi_slave.h>  // Doesn't play nicely with Quad SPI
-
 #include <driver/uart.h>
 #include <esp_random.h>
 #include <sdmmc_cmd.h>
@@ -28,8 +27,10 @@ extern SPIClass hspi;
 extern SPIFlash flash;
 extern SPIFlash psram;  // Not yet working
 
+/*****************************************************************************/
+// 
 
-// Timeout is number of seconds to wait (it'll try every 2.5 sec)
+// SD card initialization. Timeout is number of seconds to wait (it'll try every 2.5 sec)
 bool SD_init(double timeout) {
   SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_SD);
   double elapsed = 0;
@@ -61,9 +62,24 @@ size_t get_SD_size(const char filepath[]) {
   }
 }
 
+// Reads data from given SD card file to Serial Monitor. Note: prefix filenames with '/'
+void read_SD(const char filepath[]) {
+  if (SD.exists(filepath)) {
+    if (DEBUG) Serial.printf("%s:\n", filepath);
+    File f = SD.open(filepath);
+    while (f.available()) {
+      if (DEBUG) Serial.write(f.read());
+    }
+    f.close();
+    if (DEBUG) Serial.println("\n");
+  } else {
+    if (DEBUG) Serial.printf("Error: %s doesn't exist\n", filepath);
+  }
+}
+
 // Reads data from given SD card file to SB using UART. Note: buffer is passed by reference,
 // and must be instantiated with the required file's size before calling this function
-// Note: UART bottlenecked old setup from being able to use UART for continuous music transmission
+// Note: UART bottlenecked old setup from being able to use UART for continuous WAV transmission
 size_t read_SD_to_SB(const char filepath[], size_t size, uint8_t* buf) {
   if (SD.exists(filepath)) {
     File f = SD.open(filepath);
@@ -136,7 +152,8 @@ size_t send_MP3(const char filepath[]) {
     return 0;
   }
 }
-
+/*****************************************************************************/
+// Flash Functions
 // Flash initialization
 bool FL_init(double timeout) {
   SPI.begin(HSPI_CLK, HSPI_MISO, HSPI_MOSI, HSPI_CS_FL);
@@ -232,13 +249,10 @@ bool FL_flush(uint32_t newSecIdx, bool debug) {
     flash.writeULong(secIdx + 4*i, secBuf[i]);
   }
   if (debug) Serial.println("Flushed");
-
   secIdx = newSecIdx;
   for (uint32_t i = 0; i < 1024; i++) {
     secBuf[i] = flash.readULong(secIdx + 4*i);
   }
-
-
   // if (debug) Serial.printf("Erase sector 0x%x\n", secIdx);
   // for (uint32_t i = 0; i < 1024; i++) {
   //   bool ok = false;
@@ -259,13 +273,11 @@ bool FL_flush(uint32_t newSecIdx, bool debug) {
   return true;
 }
 
-
-
-
-// Flash memory does erases (changing 0s to 1s) on a sector-level
-// In order to allow word-level writes, we will need to see if we have to
-// erase the whole sector and if so, rewrite all but the new word
+// 32-bit Write
 bool FL_writeWord(const uint32_t addr, uint32_t data, bool debug) {
+  // Flash memory does erases (changing 0s to 1s) on a sector-level (4 kB)
+  // In order to allow word-level writes, we will need to see if we have to
+  // erase the whole sector and if so, rewrite all but the new word
   if (DEBUG) Serial.printf("FL_writeWord: addr 0x%08x\tdata 0x%08x\n", addr, data);
   if (addr % 4 ) {            // Ensures addr is word-aligned
     return false;
@@ -286,7 +298,7 @@ bool FL_writeWord(const uint32_t addr, uint32_t data, bool debug) {
   return true;
 }
 
-
+// 32-bit Read
 uint32_t FL_readWord(uint32_t addr, bool debug) {
   if (addr % 4 ) {            // Ensures addr is word-aligned (returning null if not)
     return (uint32_t)-1;
@@ -313,15 +325,13 @@ uint32_t FL_readWord(uint32_t addr, bool debug) {
   //   }
   //   data = newdata;
   // }
-  
   if (debug) Serial.printf("FL at 0x%x: 0x%x\n", addr, data);
   return data;
 }
 
-
+// 16-bit Write
 bool FL_writeShort(uint32_t addr, uint16_t data, uint8_t position, bool debug) {
   if ((addr % 4 ) || ((position != 0b001) && (position != 0b010)))  return false;
-  
   // Need to grab entire word to overwrite desired portion
   uint32_t oldData = FL_readWord(addr, debug);
   if (debug) Serial.printf("Writing 0x%x to 0x%x\n", data, oldData);
@@ -332,17 +342,15 @@ bool FL_writeShort(uint32_t addr, uint16_t data, uint8_t position, bool debug) {
     oldData &= ~0xFFFF;
     oldData |= data;
   }
-
   if (debug) Serial.printf("Wrote: 0x%x\n", oldData);
   secBuf[(addr & 0xFFF) >> 2] = oldData;
   secDif = true;
   while (!FL_writeWord(addr, oldData, debug));
   FL_flush(addr & ~0xFFF, false);
-
   return true;
 }
 
-
+// 16-bit Read
 uint16_t  FL_readShort(uint32_t addr, uint8_t position, bool debug) {
   if ((addr % 4 ) || ((position != 0b001) && (position != 0b010)))  return (uint16_t)-1;
   uint32_t data = FL_readWord(addr, true);
@@ -358,11 +366,10 @@ uint16_t  FL_readShort(uint32_t addr, uint8_t position, bool debug) {
   return payload;
 }
 
-
+// 8-bit Write
 bool FL_writeByte(uint32_t addr, uint8_t data, uint8_t position, bool debug) {
   if ((addr % 4 ) || ((position != 0b011) && (position != 0b100)
    && (position != 0b101) && (position != 0b110)))  return false;
-
   // Need to grab entire word to overwrite desired portion
   uint32_t oldData = FL_readWord(addr, false);
   if (position == 0b011) {
@@ -383,11 +390,10 @@ bool FL_writeByte(uint32_t addr, uint8_t data, uint8_t position, bool debug) {
   secDif = true;
   while (!FL_writeWord(addr, oldData, debug));
   FL_flush(addr & ~0xFFF, false);
-
   return true;
 }
 
-
+// 8-bit Read
 uint8_t FL_readByte(uint32_t addr, uint8_t position, bool debug) {
   if ((addr % 4 ) || ((position != 0b011) && (position != 0b100)
    && (position != 0b101) && (position != 0b110))) return (uint8_t)-1;
@@ -403,7 +409,6 @@ uint8_t FL_readByte(uint32_t addr, uint8_t position, bool debug) {
     payload = data & 0xFF;
   }
   if (debug) Serial.printf("FL at 0x%x, pos %d: 0x%x\n", addr, position, payload);
-
   return payload;
 }
-
+/*****************************************************************************/

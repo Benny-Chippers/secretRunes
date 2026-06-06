@@ -1,20 +1,19 @@
-/* Author: Damian Amerman-Smith
+/*****************************************************************************
+ * Author: Damian Amerman-Smith
  * Northbridge MCU's Firmware. 
  *
- * If having "invalid header" issues, unplug board power for ~3 seconds, then hit reset. 
  * Make sure config.h has the right PCB defined
+ * If having "invalid header" issues, unplug board power for ~3 seconds, then hit reset. 
  *
  * TODO (top-to-bottom):
-    * Allow CPU request orders/addressing to work
-    * Attach Flash memory driver to SPI transactions so CPU can read data in
+    * Ensure full SD and Flash I/O for transactions
     * Implement PSRAM
- */
-
+ *****************************************************************************/
 // Libraries
 #include <Arduino.h>
 #include <string.h>
-#include <driver/spi_slave.h>  // Doesn't play nicely with Quad SPI
-
+#include <driver/spi_slave.h>   // Doesn't play nicely with Quad SPI with chosen ESP32-WROOM-32E/UE
+                                //  modules. For faster communication, change chips
 #include <driver/uart.h>
 #include <esp_random.h>
 #include <sdmmc_cmd.h>
@@ -25,11 +24,14 @@
 #include <FS.h>
 #include <SD.h>
 #include <SPI.h>
-
+/*****************************************************************************/
+// NB Firmware Header Files
 #include "config.h"
 #include "constants.h"
 #include "memory.h"
-
+#include "global.h"
+/*****************************************************************************/
+// Instants of NB-wide data
 const int NUM_WAV = 6;
 char* wavs[] = {
   (char*)"/AIC_MitB.wav",
@@ -40,9 +42,7 @@ char* wavs[] = {
   (char*)"/8_bit.wav"
 };
 
-
 SoftwareSerial SBuart(UART_RX, UART_TX);
-const uint32_t BUF_SIZE = 64;  // Bytes in tx/rx buffers
 
 // For VSPI (NB-SB) Configuration
 spi_host_device_t cpu_host = SPI3_HOST;
@@ -75,9 +75,9 @@ sdmmc_host_t          sd_cfg = SDSPI_HOST_DEFAULT();
 sdspi_device_config_t sd;
 sdspi_dev_handle_t    sd_handle;
 spi_bus_config_t      bus_cfg;
-SPIClass hspi(HSPI);
-SPIFlash flash(HSPI_CS_FL);
-SPIFlash psram(HSPI_CS_PS);  // Not yet working
+SPIClass              hspi(HSPI);         // Object representing ESP32's HSPI 
+SPIFlash              flash(HSPI_CS_FL);
+SPIFlash              psram(HSPI_CS_PS);  // Not yet working
 
 uint64_t FL_MAX;
 uint64_t PS_MAX;
@@ -92,6 +92,8 @@ uint32_t secIdx = 0;
 uint32_t secBuf[1024] = {(uint32_t) -1 };
 bool wrote_flash = false;       // Bool for testin (prevents unnecessary rewrites)
 
+/*****************************************************************************/
+// Main NB Control Flow
 
 // Interrupt and interrupt flag cmd_rdy indicate CPU has a command to send using CMD_RDY/VSPI_D2
 bool cmd_rdy = false;
@@ -134,22 +136,6 @@ bool init_spi(spi_host_device_t host, int cs, bool debug) {
   }
   if (DEBUG) Serial.println("SPI peripheral device initialized");
   return true;
-}
-
-
-// Reads data from given SD card file to Serial Monitor. Note: prefix filenames with '/'
-void read_SD(const char filepath[]) {
-  if (SD.exists(filepath)) {
-    if (DEBUG) Serial.printf("%s:\n", filepath);
-    File f = SD.open(filepath);
-    while (f.available()) {
-      if (DEBUG) Serial.write(f.read());
-    }
-    f.close();
-    if (DEBUG) Serial.println("\n");
-  } else {
-    if (DEBUG) Serial.printf("Error: %s doesn't exist\n", filepath);
-  }
 }
 
 // Struct for interpreting NB-CPU commands
@@ -242,8 +228,7 @@ uint64_t get_ready() {
   return elapsed;
 }
 
-
-// Consider deleting: same functionality with debug = true
+// Prints out cmd struct
 void print_cmd_data(struct cmd_data data) {
   if (DEBUG) Serial.printf("dest: 0x%x\tsize: 0x%x\twrite: %d\n", data.dest, data.size, data.write);
 }
@@ -259,8 +244,7 @@ void print_buf(uint64_t* buf, int n) {
   if (DEBUG) Serial.printf("\n");
 }
 
-
-// Data from CPU arrives out of order, so this is needed to remix it
+// Data from CPU arrives out of order, so this is needed to remix it. Use when rx to/tx from CPU
 uint32_t unjumble(uint32_t d_i) {
   uint32_t bytes[4] = { 0 };
   for (int i = 0; i < 4; i++) {
@@ -270,24 +254,29 @@ uint32_t unjumble(uint32_t d_i) {
 }
 
 
-#define MUT_TIME 5000
-uint32_t SB_reg = 0;
-SemaphoreHandle_t SB_mut = NULL;
+uint32_t SB_reg = 0;              // Holds incoming SB inputs for CPU to request
+SemaphoreHandle_t SB_mut = NULL;  // Mutex for SB UART interface
 TaskHandle_t Task1;
 // Handler for incoming SB transactions. Reads UART keyboard inputs into SB_reg buffer
 // For debugging, takes in Serial input from NB
 void SB_handler(void* parameter) {
-  for (;;) {
+  for (;;) {   // Dedicated ESP32 core means a permanent loop
+    int bytes_avaliable = SBuart.available();
+    if (bytes_avaliable >= 4) {
+      for(int i = 0; i < (bytes_avaliable % 4); i++) {
+        SBuart.read();
+      }
 
-    while (SBuart.available() > 0) {
-    // while (Serial.available() > 0) {
-
+      // 32-bit transfer through byte-sized transactions
       uint32_t i = SBuart.read();
       i |= (SBuart.read() << 8);
       i |= (SBuart.read() << 16);
       i |= (SBuart.read() << 24);
-      // uint32_t i = Serial.read();
 
+      if (i & 0xF0000000) { // First nibble is only 0s, so this shows corruption
+        Serial.println("Corrupted data");
+        i = 0;
+      }
       if (xSemaphoreTake(SB_mut, MUT_TIME)) {
         SB_reg = i;
         xSemaphoreGive(SB_mut);
@@ -304,10 +293,13 @@ void setup() {
   SBuart.begin(UART_BAUD);
   if (DEBUG) Serial.println("\nHSPI Init...");
 
+  // Initializes Flash
   FL_init(10);
 
+  // Initializes SD card
   if (DEBUG) Serial.printf("\nSD Init: %d\n", SD_init(0));
 
+  // Initializes NB-CPU communication
   init_spi(cpu_host, VSPI_CS, true);
   if (fencepost) {
     fencepost = false;
@@ -315,30 +307,30 @@ void setup() {
     create_input_queue(&cmd_rec, 32);
   }
 
-  if (DEBUG) Serial.println("\nNorthbridge initialized");
-
+  // Creates mutex to protect SB uart transactions
   while (SB_mut == NULL) {
     SB_mut = xSemaphoreCreateMutex();
   }
+  // Dedicates second core to receiving SB keyboard inputs
   xTaskCreatePinnedToCore(SB_handler, "SB Handler", 1000, NULL, 0, &Task1, 0);
-}
 
+  if (DEBUG) Serial.println("\nNorthbridge initialized");
+}
 
 uint32_t sd_test = (uint32_t)-1;
 
-
-// TODO: put SPI transactions within one function. If anything hangs, exit and restart
+// Needs one dedicated core to service CPU SPI requests]
 void spi_handler() {
   uint64_t elapsed = 0;
-  // Needs one dedicated core to service CPU SPI requests]
 
-  // QUICK INCLUSION BY MAXWELL TO REMESSAGE
+  // QUICK INCLUSION BY MAXWELL TO REMESSAGE: Helps prevent hanging
+  // NB-CPU transactions caused by desyncing by dropping failed communication
   if(transaction_started == true){
     if(!cmd_rdy) {
       remessage_counter += 1;
       if(remessage_counter == 20000);
       {
-        Serial.printf("Attempting to send\n");
+        // Serial.printf("Attempting to send\n");
         send_ready();
         remessage_counter = 0;
       }
@@ -357,8 +349,7 @@ void spi_handler() {
     wait_for_queue_results();  // Makes sure cmd is received
 
     if (DEBUG) Serial.print("\ncmd line: 0b");
-    // cmd_rec &= 0xFF;
-    for (int i = 31; i >= 0; i--) if (DEBUG) Serial.printf("%d", 1 && (cmd_rec & (1 << i)));
+    if (DEBUG) for (int i = 31; i >= 0; i--) Serial.printf("%d", 1 && (cmd_rec & (1 << i)));
     if (DEBUG) Serial.println();
 
     struct cmd_data cmd = parse_cmd(cmd_rec, true);
@@ -370,47 +361,40 @@ void spi_handler() {
     } else {                              // Reads cmd just needs addr
       create_input_queue(&rec_data, 32);
     }
-    // cmd_rdy = false;
     send_ready();
     if (DEBUG) Serial.println("Data Ready");
 
     if (DEBUG) Serial.println("Waiting for addr");
-    // while (!cmd_rdy) vTaskDelay(100);
     elapsed += get_ready();
-    if (elapsed > 20) return;   
+    if (elapsed > 20) return;   // Timeout condition   
     wait_for_queue_results();
     payload = 0;
     addr = (uint32_t)(rec_data & 0xFFFFFFFF);
     addr = unjumble(addr);
-    // if (cmd.write) {
-      // payload = (uint32_t) (rec_data >> 32);
-      // Serial.printf("addr: 0x%08x\t", addr);
-      // Serial.printf("data: 0x%08x\n", payload);
-    // } else {
-      // print_buf((uint64_t*) &addr, 32);
-      // Serial.printf("addr: 0x%08x\n", addr);
-    // }
 
     uint32_t retWord = (uint32_t)-1;
-    if (!cmd.write) {                 // write == 0 means reading
+    if (!cmd.write) {                 // Read Command
       if (DEBUG) Serial.println("Read command");
       if (DEBUG) Serial.printf("addr: 0x%08x\n", addr);
 
-      // Implement read...
+      // Implement read command
       switch(cmd.dest) {
         case PSRAM:
+
           if (DEBUG) Serial.println("The PSRAM read totally works...");
+
           break;
         case FLASH:
-          if (DEBUG) Serial.println("The Flash read totally works...");
           retWord = FL_readWord(addr, true);
 
-          if (DEBUG) Serial.printf("flash read: 0x%08x\n", retWord);
+          if (DEBUG) Serial.printf("The Flash read: 0x%08x\n", retWord);
 
           break;
         case SD_CARD:
-          if (DEBUG) Serial.printf("The SD read totally works...0x%08x\n", sd_test);
           retWord = sd_test;
+
+          if (DEBUG) Serial.printf("The SD read totally works...0x%08x\n", sd_test);
+          
           break;
         case SB:      // CPU reading SB's keyboard inputs
           if (DEBUG) Serial.printf("Reading from SB: ");
@@ -426,14 +410,14 @@ void spi_handler() {
           break;
       }
 
+      // Sends back data
       rec_data = unjumble(retWord);
       create_output_queue(&rec_data, 32);
       send_ready();
       if (DEBUG) Serial.println("Data Ready");
       // while (!cmd_rdy) vTaskDelay(1);
       wait_for_queue_results();
-      
-      // Send back data...
+       
     } else {
       if (DEBUG) Serial.println("Write command");
       // Add control flow so only SB-targetted writes trigger send_MP3
@@ -464,6 +448,7 @@ void spi_handler() {
           break;
         case CPU_S:
         default:
+          // Takes in serial output from the CPU one byte at a time, printing when getting '\n
           uint8_t byte = payload;
           srl_buf[srl_idx++] = byte;
           if (DEBUG) Serial.println("Added CPU serial output to buffer");
@@ -484,12 +469,12 @@ void spi_handler() {
       if (DEBUG) Serial.println("Data Ready");
     }
 
-    // Currently sending test data. Implement actual read system using addr...
+    // Clears NB-CPU buffers for next transaction 
     clear_buf(&rec_data);
-
-    if (DEBUG) Serial.println("Finished CPU transaction");
     clear_buf(&cmd_rec);
     create_input_queue(&cmd_rec, 32);
+    
+    if (DEBUG) Serial.println("Finished CPU transaction");
   }
   cmd_rdy = false;
   return;
@@ -500,9 +485,11 @@ void spi_handler() {
 
 // Main control loop
 void loop() {
+   
   if (xSemaphoreTake(SB_mut, MUT_TIME)) {
-    // SB_keyboard = i++;
-    Serial.printf("NB: 0x%08x\n", SB_reg);
+    Serial.printf("NB: 0x%08x\t", SB_reg);
+    for (int i = 31; i >= 0; i--) Serial.printf("%d", 1 && (SB_reg & (1 << i)));
+    Serial.println();
     xSemaphoreGive(SB_mut);
   }  
 
@@ -519,7 +506,7 @@ void loop() {
   // create_input_queue(&cmd_rec, 32);
 
   delay(10);
-  Serial.println("Repeating main loop");
+  // Serial.println("Repeating main loop");
 }
 
 
@@ -535,22 +522,22 @@ void loop() {
 //     FL_writeWord(addr, data, true);
 //   }
 
-// //   // flash.eraseSector(addr);
-// //   delay(2500);
-// //   Serial.println("About to write to flash");
+//   flash.eraseSector(addr);
+//   delay(2500);
+//   Serial.println("About to write to flash");
   
-// //   // FL_printHexWord(addr);
+//   FL_printHexWord(addr);
 
-// //   // uint16_t data2 = 0xDEAD;
-// //   FL_writeWord(addr, 0x89ABCDEF, true);
-// //   // FL_printHexWord(addr);
+//   uint16_t data2 = 0xDEAD;
+//   FL_writeWord(addr, 0x89ABCDEF, true);
+//   FL_printHexWord(addr);
   
-// //   delay(2500);
+//   delay(2500);
 
-// //   // FL_writeWord(addr2, 0xDEADBEEF, true);
-// //   // FL_printHexWord(addr2);
+//   FL_writeWord(addr2, 0xDEADBEEF, true);
+//   FL_printHexWord(addr2);
 
-// //   Serial.println("Done");
+//   Serial.println("Done");
 // }
 
 // for (uint32_t i = 0; i < 100; i++) {
